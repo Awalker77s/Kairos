@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createProject, getProjects } from '../lib/projects'
+import { getUserPlan } from '../lib/billing'
 import { getRendersByProject } from '../lib/renders'
 import type { Project } from '../types/supabase'
 
@@ -29,6 +30,7 @@ export function DashboardPage() {
   const [prompt, setPrompt] = useState('')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [maxProjects, setMaxProjects] = useState<number | null>(null)
 
   useEffect(() => {
     const loadProjects = async () => {
@@ -36,8 +38,9 @@ export function DashboardPage() {
       setError(null)
 
       try {
-        const results = await getProjects()
+        const [results, plan] = await Promise.all([getProjects(), getUserPlan()])
         setProjects(results)
+        setMaxProjects(plan.entitlements.maxProjects)
 
         const thumbnails = await Promise.all(
           results.map(async (project) => {
@@ -80,6 +83,11 @@ export function DashboardPage() {
       return
     }
 
+    if (maxProjects !== null && projects.length >= maxProjects) {
+      setCreateError(`You have reached your ${maxProjects}-project limit on the FREE plan.`)
+      return
+    }
+
     setCreating(true)
     try {
       const project = await createProject(prompt)
@@ -99,6 +107,9 @@ export function DashboardPage() {
         <div>
           <h1 className="font-serif text-3xl font-bold text-warm-black">My Projects</h1>
           <p className="mt-2 text-warm-stone">Track each project from prompt to render.</p>
+          {maxProjects !== null && (
+            <p className="mt-1 text-xs text-warm-stone">{projects.length}/{maxProjects} projects used on Free.</p>
+          )}
         </div>
         <button
           type="button"
