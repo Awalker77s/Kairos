@@ -8,8 +8,8 @@ export function ProtectedRoute({ children }: PropsWithChildren) {
 
   if (loading) {
     return (
-      <main className="mx-auto flex min-h-[60vh] w-full max-w-6xl items-center justify-center px-4">
-        <p className="text-stone">Checking your session…</p>
+      <main className="mx-auto flex min-h-[60vh] w-full max-w-6xl items-center justify-center px-6">
+        <p className="text-warm-stone">Checking your session&hellip;</p>
       </main>
     )
   }

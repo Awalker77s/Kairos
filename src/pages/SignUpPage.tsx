@@ -50,51 +50,51 @@ export function SignUpPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-[calc(100vh-12rem)] w-full max-w-6xl items-center justify-center px-4 py-12">
-      <section className="w-full max-w-md rounded-2xl border border-white/10 bg-charcoal/70 p-8 shadow-2xl shadow-black/30">
-        <h1 className="text-2xl font-semibold text-off-white">Create your Kairos account</h1>
-        <p className="mt-2 text-sm text-stone">Start turning ideas into plans, models, and renders.</p>
+    <main className="mx-auto flex min-h-[calc(100vh-12rem)] w-full max-w-6xl items-center justify-center px-6 py-12">
+      <section className="w-full max-w-md rounded-2xl border border-warm-border bg-warm-white p-8 shadow-lg">
+        <h1 className="font-serif text-2xl font-semibold text-warm-black">Create Your Kairos Account</h1>
+        <p className="mt-2 text-sm text-warm-stone">Start turning ideas into plans, models, and renders.</p>
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-          <label className="block text-sm text-stone">
+          <label className="block text-sm font-medium text-warm-black">
             Email
             <input
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               required
-              className="mt-1 w-full rounded-lg border border-white/15 bg-brand-black px-3 py-2 text-off-white outline-none ring-brand-orange/50 transition focus:ring"
+              className="mt-1 w-full rounded-lg border border-warm-border bg-cream px-3 py-2.5 text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
             />
           </label>
 
-          <label className="block text-sm text-stone">
+          <label className="block text-sm font-medium text-warm-black">
             Password
             <input
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required
-              className="mt-1 w-full rounded-lg border border-white/15 bg-brand-black px-3 py-2 text-off-white outline-none ring-brand-orange/50 transition focus:ring"
+              className="mt-1 w-full rounded-lg border border-warm-border bg-cream px-3 py-2.5 text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
             />
           </label>
 
-          <label className="block text-sm text-stone">
+          <label className="block text-sm font-medium text-warm-black">
             Confirm password
             <input
               type="password"
               value={confirmPassword}
               onChange={(event) => setConfirmPassword(event.target.value)}
               required
-              className="mt-1 w-full rounded-lg border border-white/15 bg-brand-black px-3 py-2 text-off-white outline-none ring-brand-orange/50 transition focus:ring"
+              className="mt-1 w-full rounded-lg border border-warm-border bg-cream px-3 py-2.5 text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
             />
           </label>
 
-          <label className="block text-sm text-stone">
+          <label className="block text-sm font-medium text-warm-black">
             Role
             <select
               value={role}
               onChange={(event) => setRole(event.target.value as (typeof roleOptions)[number])}
-              className="mt-1 w-full rounded-lg border border-white/15 bg-brand-black px-3 py-2 text-off-white outline-none ring-brand-orange/50 transition focus:ring"
+              className="mt-1 w-full rounded-lg border border-warm-border bg-cream px-3 py-2.5 text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
             >
               {roleOptions.map((option) => (
                 <option key={option} value={option}>
@@ -104,17 +104,17 @@ export function SignUpPage() {
             </select>
           </label>
 
-          {error && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>}
+          {error && <p className="rounded-lg border border-red-300/40 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
           {successMessage && (
-            <p className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">{successMessage}</p>
+            <p className="rounded-lg border border-emerald-400/40 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{successMessage}</p>
           )}
 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-lg bg-brand-orange px-4 py-2 font-semibold text-brand-black transition hover:bg-amber disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-lg bg-gold px-4 py-2.5 font-semibold text-warm-black transition hover:bg-gold-dark disabled:cursor-not-allowed disabled:opacity-70"
           >
-            {submitting ? 'Creating account…' : 'Sign Up'}
+            {submitting ? 'Creating account\u2026' : 'Sign Up'}
           </button>
         </form>
 
@@ -122,14 +122,14 @@ export function SignUpPage() {
           type="button"
           onClick={handleGoogle}
           disabled={submitting}
-          className="mt-3 w-full rounded-lg border border-white/20 px-4 py-2 font-medium text-off-white transition hover:border-amber disabled:cursor-not-allowed disabled:opacity-70"
+          className="mt-3 w-full rounded-lg border border-warm-border px-4 py-2.5 font-medium text-warm-black transition hover:border-gold hover:text-gold disabled:cursor-not-allowed disabled:opacity-70"
         >
           Continue with Google
         </button>
 
-        <p className="mt-6 text-center text-sm text-stone">
+        <p className="mt-6 text-center text-sm text-warm-stone">
           Already have an account?{' '}
-          <Link to="/signin" className="text-amber hover:text-brand-orange">
+          <Link to="/signin" className="font-medium text-gold hover:text-gold-dark">
             Sign in
           </Link>
         </p>

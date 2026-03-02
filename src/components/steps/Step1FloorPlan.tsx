@@ -93,9 +93,9 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
   }
 
   return (
-    <section className="space-y-5 rounded-2xl border border-white/10 bg-black/20 p-6">
+    <section className="space-y-5 rounded-2xl border border-warm-border bg-warm-white p-6 shadow-sm">
       <div>
-        <label htmlFor="project-prompt" className="mb-2 block text-sm font-medium text-white">
+        <label htmlFor="project-prompt" className="mb-2 block text-sm font-medium text-warm-black">
           Initial prompt
         </label>
         <textarea
@@ -104,9 +104,9 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
           onChange={(event) => setPromptValue(event.target.value)}
           onBlur={savePrompt}
           rows={6}
-          className="w-full rounded-xl border border-white/15 bg-black/30 px-4 py-3 text-sm text-white outline-none ring-brand/70 transition focus:ring"
+          className="w-full rounded-xl border border-warm-border bg-cream px-4 py-3 text-sm text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
         />
-        <p className="mt-2 text-xs text-stone">{isSavingPrompt ? 'Saving prompt…' : 'Prompt auto-saves on blur.'}</p>
+        <p className="mt-2 text-xs text-warm-stone">{isSavingPrompt ? 'Saving prompt\u2026' : 'Prompt auto-saves on blur.'}</p>
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -114,7 +114,7 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
           type="button"
           onClick={handleGenerateFloorPlan}
           disabled={isGenerating}
-          className="rounded-full bg-brand px-5 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-full bg-gold px-5 py-2 text-sm font-medium text-warm-black transition hover:bg-gold-dark disabled:cursor-not-allowed disabled:opacity-60"
         >
           Generate Floor Plan
         </button>
@@ -123,25 +123,25 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
           type="button"
           onClick={proceedToModel}
           disabled={!hasFloorPlan}
-          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold disabled:cursor-not-allowed disabled:opacity-50"
         >
           Proceed to 3D Model
         </button>
       </div>
 
       {isGenerating && (
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          Generating your floor plan…
+        <div className="flex items-center gap-3 rounded-xl border border-warm-border bg-cream px-4 py-3 text-sm text-warm-stone">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gold border-t-transparent" />
+          Generating your floor plan&hellip;
         </div>
       )}
 
-      {error && <p className="text-sm text-red-300">{error}</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
 
       {project.floor_plan_json ? (
         <FloorPlanCanvas floorPlanJson={project.floor_plan_json} />
       ) : (
-        <div className="rounded-xl border border-dashed border-white/20 bg-white/5 p-8 text-center text-stone">
+        <div className="rounded-xl border-2 border-dashed border-warm-border bg-cream p-8 text-center text-warm-stone">
           Your generated floor plan will appear here.
         </div>
       )}

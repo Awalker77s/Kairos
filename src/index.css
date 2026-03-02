@@ -4,8 +4,16 @@
 
 @layer base {
   body {
-    @apply bg-brand-black text-off-white antialiased;
-    background-image: radial-gradient(circle at top, #232323 0%, #0a0a0a 60%);
-    font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    @apply bg-cream text-warm-black antialiased;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Playfair Display', Georgia, serif;
   }
 }
