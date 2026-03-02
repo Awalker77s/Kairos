@@ -1,10 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { updateProject } from '../../lib/projects'
-import type { Project } from '../../types/supabase'
+import { getRendersByProject } from '../../lib/renders'
+import { useAuth } from '../../context/AuthContext'
+import type { Project, RoomRender } from '../../types/supabase'
 
 const styles = ['Modern', 'Scandinavian', 'Industrial', 'Mid-Century', 'Farmhouse', 'Luxury', 'Minimalist']
 
 type RoomData = {
+  id: string
   name: string
   type: string
 }
@@ -15,7 +18,11 @@ type Step3RendersProps = {
 }
 
 export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
+  const { session } = useAuth()
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isLoadingRenders, setIsLoadingRenders] = useState(true)
+  const [renders, setRenders] = useState<RoomRender[]>([])
+  const [selectedRender, setSelectedRender] = useState<RoomRender | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const rooms = useMemo(() => {
@@ -32,17 +39,35 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
         }
 
         const roomRecord = room as Record<string, unknown>
+        const id = typeof roomRecord.id === 'string' ? roomRecord.id : null
         const name = typeof roomRecord.name === 'string' ? roomRecord.name : null
         const type = typeof roomRecord.type === 'string' ? roomRecord.type : 'Room'
 
-        if (!name) {
+        if (!id || !name) {
           return null
         }
 
-        return { name, type }
+        return { id, name, type }
       })
       .filter((room): room is RoomData => room !== null)
   }, [project.floor_plan_json])
+
+  useEffect(() => {
+    async function loadRenders() {
+      setIsLoadingRenders(true)
+
+      try {
+        const existingRenders = await getRendersByProject(project.id)
+        setRenders(existingRenders)
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load existing renders.')
+      } finally {
+        setIsLoadingRenders(false)
+      }
+    }
+
+    void loadRenders()
+  }, [project.id])
 
   async function selectStyle(style: string) {
     if (style === project.style) {
@@ -60,6 +85,11 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
   }
 
   async function generateRoomRenders() {
+    if (!session?.access_token) {
+      setError('You must be signed in to generate renders.')
+      return
+    }
+
     setError(null)
     setIsGenerating(true)
 
@@ -67,16 +97,27 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-room-renders`, {
         method: 'POST',
         headers: {
+          Authorization: `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           projectId: project.id,
-          style: project.style,
+          style: project.style ?? styles[0],
         }),
       })
 
+      const payload = await response.json().catch(() => null)
+
       if (!response.ok) {
-        throw new Error('Render generation request failed.')
+        throw new Error(payload?.error ?? 'Render generation request failed.')
+      }
+
+      const nextRenders = Array.isArray(payload?.renders) ? (payload.renders as RoomRender[]) : []
+      setRenders(nextRenders)
+
+      if (project.status !== 'rendered') {
+        const updated = await updateProject(project.id, { status: 'rendered' })
+        onProjectChange(updated)
       }
     } catch (renderError) {
       setError(renderError instanceof Error ? renderError.message : 'Unable to generate room renders.')
@@ -94,6 +135,10 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
       setError(statusError instanceof Error ? statusError.message : 'Unable to return to 3D model step.')
     }
   }
+
+  const renderByRoomName = useMemo(() => {
+    return new Map(renders.map((render) => [render.room_name, render]))
+  }, [renders])
 
   return (
     <section className="space-y-5 rounded-2xl border border-white/10 bg-black/20 p-6">
@@ -131,26 +176,114 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
         <button
           type="button"
           onClick={generateRoomRenders}
-          disabled={isGenerating}
+          disabled={isGenerating || rooms.length === 0}
           className="rounded-full bg-brand px-5 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isGenerating ? 'Generating…' : 'Generate Room Renders'}
         </button>
+        {renders.length > 0 && (
+          <button
+            type="button"
+            onClick={generateRoomRenders}
+            disabled={isGenerating}
+            className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Regenerate All
+          </button>
+        )}
       </div>
 
-      {rooms.length === 0 ? (
+      {isLoadingRenders ? (
+        <p className="text-sm text-stone">Loading existing renders…</p>
+      ) : rooms.length === 0 ? (
         <p className="text-sm text-stone">No rooms available yet. Generate a floor plan first.</p>
       ) : (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {rooms.map((room) => (
-            <article key={room.name} className="rounded-xl border border-white/15 bg-white/5 p-4">
-              <h3 className="font-medium text-white">{room.name}</h3>
-              <p className="mt-1 text-sm text-stone">{room.type}</p>
-              <div className="mt-4 rounded-lg border border-dashed border-white/20 bg-black/20 p-6 text-center text-xs text-stone">
-                Render placeholder
+          {rooms.map((room) => {
+            const render = renderByRoomName.get(room.name)
+
+            if (isGenerating && !render) {
+              return (
+                <article key={room.id} className="rounded-xl border border-white/15 bg-white/5 p-4">
+                  <h3 className="font-medium text-white">{room.name}</h3>
+                  <p className="mt-1 text-sm text-stone">{room.type}</p>
+                  <div className="mt-4 flex h-52 flex-col items-center justify-center rounded-lg border border-dashed border-white/20 bg-black/20 text-stone">
+                    <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/40 border-t-brand" />
+                    <p className="text-xs">Generating render…</p>
+                  </div>
+                </article>
+              )
+            }
+
+            return (
+              <article
+                key={room.id}
+                className="cursor-pointer rounded-xl border border-white/15 bg-white/5 p-3 transition hover:border-white/30"
+                onClick={() => {
+                  if (render?.image_url) {
+                    setSelectedRender(render)
+                  }
+                }}
+              >
+                <div className="aspect-square overflow-hidden rounded-lg bg-black/20">
+                  {render?.image_url ? (
+                    <img src={render.image_url} alt={room.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-stone">No render yet</div>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div>
+                    <h3 className="font-medium text-white">{room.name}</h3>
+                    <p className="text-sm text-stone">{room.type}</p>
+                  </div>
+                  {render?.image_url && (
+                    <a
+                      href={render.image_url}
+                      download={`${room.name.replaceAll(' ', '-').toLowerCase()}.png`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                      }}
+                      className="rounded-full border border-white/25 px-3 py-1.5 text-xs text-white"
+                    >
+                      Download
+                    </a>
+                  )}
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      )}
+
+      {selectedRender?.image_url && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setSelectedRender(null)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+              setSelectedRender(null)
+            }
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
+        >
+          <div className="max-h-full w-full max-w-4xl overflow-auto rounded-xl border border-white/15 bg-black p-4">
+            <div className="mb-3 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">{selectedRender.room_name}</h3>
+                <p className="mt-1 text-xs text-stone">{selectedRender.prompt_used}</p>
               </div>
-            </article>
-          ))}
+              <button
+                type="button"
+                onClick={() => setSelectedRender(null)}
+                className="rounded-full border border-white/20 px-3 py-1 text-xs text-white"
+              >
+                Close
+              </button>
+            </div>
+            <img src={selectedRender.image_url} alt={selectedRender.room_name} className="w-full rounded-lg object-contain" />
+          </div>
         </div>
       )}
 
