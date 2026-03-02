@@ -187,8 +187,6 @@ export function DashboardPage() {
                 />
               </label>
 
-              {createError && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{createError}</p>}
-
               <div className="flex justify-end">
                 <button
                   type="submit"
@@ -198,6 +196,8 @@ export function DashboardPage() {
                   {creating ? 'Creating Project…' : 'Create Project'}
                 </button>
               </div>
+
+              {createError && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">{createError}</p>}
             </form>
           </div>
         </div>
