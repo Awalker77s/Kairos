@@ -1,7 +1,10 @@
 import { Link, NavLink } from 'react-router-dom'
 import type { PropsWithChildren } from 'react'
+import { useAuth } from '../context/AuthContext'
 
 export function Layout({ children }: PropsWithChildren) {
+  const { user, signOut } = useAuth()
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-white/10 bg-brand-black/80 backdrop-blur">
@@ -15,12 +18,37 @@ export function Layout({ children }: PropsWithChildren) {
             <NavItem to="/blog">Blog</NavItem>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/signin" className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber">
-              Sign In
-            </Link>
-            <Link to="/signup" className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber">
-              Get Started
-            </Link>
+            {user ? (
+              <>
+                <Link
+                  to="/dashboard"
+                  className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber"
+                >
+                  Dashboard
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void signOut()
+                  }}
+                  className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/signin" className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber">
+                  Sign In
+                </Link>
+                <Link
+                  to="/signup"
+                  className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber"
+                >
+                  Get Started
+                </Link>
+              </>
+            )}
           </div>
         </nav>
       </header>
