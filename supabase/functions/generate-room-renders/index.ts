@@ -100,12 +100,12 @@ async function generateImage(openAiApiKey: string, prompt: string): Promise<stri
   return imageUrl
 }
 
-serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+serve(async (request) => {
+  if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  if (req.method !== 'POST') {
+  if (request.method !== 'POST') {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
@@ -117,7 +117,7 @@ serve(async (req) => {
     return jsonResponse({ error: 'Missing required environment variables.' }, 500)
   }
 
-  const authHeader = req.headers.get('Authorization')
+  const authHeader = request.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
@@ -127,7 +127,7 @@ serve(async (req) => {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
 
-  const body = await req.json().catch(() => null)
+  const body = await request.json().catch(() => null)
   const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
   const style = typeof body?.style === 'string' ? body.style.trim() : ''
 
