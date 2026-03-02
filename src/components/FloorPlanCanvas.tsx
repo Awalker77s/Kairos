@@ -1,14 +1,196 @@
+type FloorPlanRoom = {
+  id: string
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+type FloorPlanOpening = {
+  id: string
+  roomId: string
+  wall: 'top' | 'bottom' | 'left' | 'right'
+  position: number
+  width: number
+}
+
+type FloorPlanJson = {
+  rooms: FloorPlanRoom[]
+  doors?: FloorPlanOpening[]
+  windows?: FloorPlanOpening[]
+}
+
 type FloorPlanCanvasProps = {
-  floorPlanJson: Record<string, unknown>
+  floorPlanJson: FloorPlanJson | null
+}
+
+const MAX_WIDTH = 800
+const MAX_HEIGHT = 600
+const PADDING = 24
+
+function getBounds(rooms: FloorPlanRoom[]) {
+  const minX = Math.min(...rooms.map((room) => room.x))
+  const minY = Math.min(...rooms.map((room) => room.y))
+  const maxX = Math.max(...rooms.map((room) => room.x + room.width))
+  const maxY = Math.max(...rooms.map((room) => room.y + room.height))
+
+  return {
+    minX,
+    minY,
+    width: Math.max(1, maxX - minX),
+    height: Math.max(1, maxY - minY),
+  }
+}
+
+function openingPoint(room: FloorPlanRoom, opening: FloorPlanOpening) {
+  const start = opening.position
+  const end = opening.position + opening.width
+
+  if (opening.wall === 'top') {
+    return { x1: room.x + start, y1: room.y, x2: room.x + end, y2: room.y }
+  }
+
+  if (opening.wall === 'bottom') {
+    return { x1: room.x + start, y1: room.y + room.height, x2: room.x + end, y2: room.y + room.height }
+  }
+
+  if (opening.wall === 'left') {
+    return { x1: room.x, y1: room.y + start, x2: room.x, y2: room.y + end }
+  }
+
+  return { x1: room.x + room.width, y1: room.y + start, x2: room.x + room.width, y2: room.y + end }
 }
 
 export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
+  if (!floorPlanJson) {
+    return null
+  }
+
+  const rooms = Array.isArray(floorPlanJson.rooms) ? floorPlanJson.rooms : []
+
+  if (!rooms.length) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-sm text-stone">
+        Floor plan data is missing room geometry.
+      </div>
+    )
+  }
+
+  const doors = Array.isArray(floorPlanJson.doors) ? floorPlanJson.doors : []
+  const windows = Array.isArray(floorPlanJson.windows) ? floorPlanJson.windows : []
+
+  const bounds = getBounds(rooms)
+  const scale = Math.min((MAX_WIDTH - PADDING * 2) / bounds.width, (MAX_HEIGHT - PADDING * 2) / bounds.height)
+
+  const viewWidth = bounds.width + PADDING * 2
+  const viewHeight = bounds.height + PADDING * 2
+
   return (
-    <div className="rounded-xl border border-dashed border-white/20 bg-white/5 p-8 text-center text-stone">
-      Floor Plan Canvas — coming next
-      <pre className="mt-4 overflow-auto rounded bg-black/30 p-3 text-left text-xs text-stone">
-        {JSON.stringify(floorPlanJson, null, 2)}
-      </pre>
+    <div className="w-full max-w-[800px] overflow-hidden rounded-xl border border-white/10 bg-black/30">
+      <svg
+        className="h-auto w-full"
+        viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label="Generated 2D floor plan"
+      >
+        <defs>
+          <pattern id="grid" width="4" height="4" patternUnits="userSpaceOnUse">
+            <path d="M 4 0 L 0 0 0 4" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.08" />
+          </pattern>
+        </defs>
+
+        <g transform={`translate(${PADDING}, ${PADDING}) scale(${scale}) translate(${-bounds.minX}, ${-bounds.minY})`}>
+          <rect x={bounds.minX} y={bounds.minY} width={bounds.width} height={bounds.height} fill="url(#grid)" />
+
+          {rooms.map((room) => (
+            <g key={room.id}>
+              <rect
+                x={room.x}
+                y={room.y}
+                width={room.width}
+                height={room.height}
+                fill="#1A1A1A"
+                stroke="#FF6A00"
+                strokeWidth={0.2}
+                rx={0.2}
+              />
+              <text
+                x={room.x + room.width / 2}
+                y={room.y + room.height / 2}
+                fill="#F3EEE8"
+                fontSize={1.2}
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {room.name}
+              </text>
+              <text
+                x={room.x + room.width / 2}
+                y={room.y + room.height / 2 + 1.5}
+                fill="#F3EEE8"
+                fontSize={0.8}
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {`${room.width}' × ${room.height}'`}
+              </text>
+            </g>
+          ))}
+
+          {doors.map((door) => {
+            const room = rooms.find((item) => item.id === door.roomId)
+            if (!room) return null
+
+            const segment = openingPoint(room, door)
+            const isHorizontal = door.wall === 'top' || door.wall === 'bottom'
+            const arcSweep = door.wall === 'top' || door.wall === 'left' ? 1 : 0
+
+            return (
+              <path
+                key={door.id}
+                d={
+                  isHorizontal
+                    ? `M ${segment.x1} ${segment.y1} A ${door.width} ${door.width} 0 0 ${arcSweep} ${segment.x2} ${segment.y2}`
+                    : `M ${segment.x1} ${segment.y1} A ${door.width} ${door.width} 0 0 ${arcSweep} ${segment.x2} ${segment.y2}`
+                }
+                fill="none"
+                stroke="#F3EEE8"
+                strokeWidth={0.15}
+              />
+            )
+          })}
+
+          {windows.map((windowItem) => {
+            const room = rooms.find((item) => item.id === windowItem.roomId)
+            if (!room) return null
+
+            const segment = openingPoint(room, windowItem)
+            const offset = 0.22
+
+            if (windowItem.wall === 'top' || windowItem.wall === 'bottom') {
+              const y = segment.y1
+              const windowOffset = windowItem.wall === 'top' ? -offset : offset
+              return (
+                <g key={windowItem.id} stroke="#F3EEE8" strokeWidth={0.12}>
+                  <line x1={segment.x1} y1={y - windowOffset} x2={segment.x2} y2={y - windowOffset} />
+                  <line x1={segment.x1} y1={y + windowOffset} x2={segment.x2} y2={y + windowOffset} />
+                </g>
+              )
+            }
+
+            const x = segment.x1
+            const windowOffset = windowItem.wall === 'left' ? -offset : offset
+            return (
+              <g key={windowItem.id} stroke="#F3EEE8" strokeWidth={0.12}>
+                <line x1={x - windowOffset} y1={segment.y1} x2={x - windowOffset} y2={segment.y2} />
+                <line x1={x + windowOffset} y1={segment.y1} x2={x + windowOffset} y2={segment.y2} />
+              </g>
+            )
+          })}
+        </g>
+      </svg>
     </div>
   )
 }
