@@ -17,7 +17,9 @@
     "@react-three/drei": "^9.121.4",
     "@react-three/fiber": "^8.17.14",
     "three": "^0.170.0",
-    "@types/three": "^0.170.0"
+    "@types/three": "^0.170.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

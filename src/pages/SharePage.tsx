@@ -1,11 +1,109 @@
-import { useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { FloorPlanCanvas } from '../components/FloorPlanCanvas'
+import { getProject } from '../lib/projects'
+import { getRendersByProject } from '../lib/renders'
+import type { Project, RoomRender } from '../types/supabase'
 
 export function SharePage() {
   const { id } = useParams()
+  const [project, setProject] = useState<Project | null>(null)
+  const [renders, setRenders] = useState<RoomRender[]>([])
+  const [loading, setLoading] = useState(true)
+  const [notFound, setNotFound] = useState(false)
+
+  useEffect(() => {
+    async function loadShareProject(projectId: string) {
+      setLoading(true)
+      setNotFound(false)
+
+      try {
+        const loadedProject = await getProject(projectId)
+        const loadedRenders = await getRendersByProject(projectId)
+        setProject(loadedProject)
+        setRenders(loadedRenders)
+      } catch {
+        setNotFound(true)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (!id) {
+      setLoading(false)
+      setNotFound(true)
+      return
+    }
+
+    void loadShareProject(id)
+  }, [id])
+
+  if (loading) {
+    return (
+      <main className="mx-auto w-full max-w-6xl px-4 py-16">
+        <p className="text-stone">Loading shared project…</p>
+      </main>
+    )
+  }
+
+  if (notFound || !project) {
+    return (
+      <main className="mx-auto w-full max-w-6xl px-4 py-16 text-center">
+        <h1 className="text-3xl font-bold">Project not found</h1>
+        <p className="mt-3 text-stone">This shared link may be invalid or the project is no longer available.</p>
+        <Link to="/" className="mt-6 inline-flex rounded-lg bg-brand-orange px-5 py-2.5 text-sm font-semibold text-brand-black hover:bg-amber">
+          Go to Kairo
+        </Link>
+      </main>
+    )
+  }
+
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-20">
-      <h1 className="text-3xl font-bold">Public Share View</h1>
-      <p className="mt-3 text-stone">Viewing shared project: {id}</p>
+    <main className="mx-auto w-full max-w-6xl px-4 py-10">
+      <header className="mb-8 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wider text-stone">Public Project Share</p>
+          <h1 className="mt-1 text-3xl font-bold">{project.title || 'Untitled Project'}</h1>
+        </div>
+        <span className="rounded-full border border-white/20 bg-white/5 px-4 py-1.5 text-sm text-stone">Style: {project.style || 'Not selected'}</span>
+      </header>
+
+      <section className="rounded-2xl border border-white/10 bg-black/20 p-6">
+        <h2 className="mb-4 text-xl font-semibold">2D Floor Plan</h2>
+        <FloorPlanCanvas floorPlanJson={project.floor_plan_json as never} />
+      </section>
+
+      <section className="mt-8 rounded-2xl border border-white/10 bg-black/20 p-6">
+        <h2 className="mb-4 text-xl font-semibold">Room Renders</h2>
+        {renders.length === 0 ? (
+          <p className="text-sm text-stone">No room renders available for this project yet.</p>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {renders.map((render) => (
+              <article key={render.id} className="rounded-xl border border-white/15 bg-white/5 p-3">
+                <div className="aspect-square overflow-hidden rounded-lg bg-black/20">
+                  {render.image_url ? (
+                    <img src={render.image_url} alt={render.room_name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-xs text-stone">No render yet</div>
+                  )}
+                </div>
+                <div className="mt-3">
+                  <h3 className="font-medium text-white">{render.room_name}</h3>
+                  <p className="mt-1 text-xs text-stone">{render.prompt_used || 'No prompt recorded.'}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <footer className="mt-10 rounded-xl border border-white/10 bg-charcoal/70 px-4 py-3 text-center text-sm text-stone">
+        Created with Kairo ·{' '}
+        <Link to="/" className="font-medium text-off-white underline-offset-2 hover:text-amber hover:underline">
+          Visit Kairo
+        </Link>
+      </footer>
     </main>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { Toast } from '../components/Toast'
 import { StepIndicator } from '../components/StepIndicator'
 import { Step1FloorPlan } from '../components/steps/Step1FloorPlan'
 import { Step2Model3D } from '../components/steps/Step2Model3D'
@@ -26,6 +27,7 @@ export function ProjectEditor() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSavingTitle, setIsSavingTitle] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [toastMessage, setToastMessage] = useState<string | null>(null)
 
   useEffect(() => {
     async function loadProject(projectId: string) {
@@ -53,6 +55,48 @@ export function ProjectEditor() {
   }, [id])
 
   const activeStep = useMemo(() => (project ? getStepFromStatus(project.status) : 1), [project])
+  const [displayedStep, setDisplayedStep] = useState(activeStep)
+  const [isStepVisible, setIsStepVisible] = useState(true)
+
+  useEffect(() => {
+    if (activeStep === displayedStep) {
+      return
+    }
+
+    setIsStepVisible(false)
+    const timeoutId = window.setTimeout(() => {
+      setDisplayedStep(activeStep)
+      setIsStepVisible(true)
+    }, 180)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeStep, displayedStep])
+
+
+  async function shareProject() {
+    if (!project) {
+      return
+    }
+
+    const shareUrl = `${window.location.origin}/share/${project.id}`
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(shareUrl)
+      } else {
+        const input = document.createElement('input')
+        input.value = shareUrl
+        document.body.appendChild(input)
+        input.select()
+        document.execCommand('copy')
+        input.remove()
+      }
+
+      setToastMessage('Link copied!')
+    } catch {
+      setError('Unable to copy share link. Please try again.')
+    }
+  }
 
   async function saveTitle() {
     if (!project) {
@@ -119,15 +163,27 @@ export function ProjectEditor() {
           />
           <p className="mt-2 text-xs text-stone">{isSavingTitle ? 'Saving title…' : 'Title auto-saves on blur.'}</p>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            void shareProject()
+          }}
+          className="rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white"
+        >
+          Share Project
+        </button>
       </header>
 
       <StepIndicator status={project.status} />
 
-      {activeStep === 1 && <Step1FloorPlan project={project} onProjectChange={setProject} />}
-      {activeStep === 2 && <Step2Model3D project={project} onProjectChange={setProject} />}
-      {activeStep === 3 && <Step3Renders project={project} onProjectChange={setProject} />}
+      <div className={`transition-opacity duration-200 ${isStepVisible ? 'opacity-100' : 'opacity-0'}`}>
+        {displayedStep === 1 && <Step1FloorPlan project={project} onProjectChange={setProject} />}
+        {displayedStep === 2 && <Step2Model3D project={project} onProjectChange={setProject} />}
+        {displayedStep === 3 && <Step3Renders project={project} onProjectChange={setProject} />}
+      </div>
 
       {error && <p className="mt-4 text-sm text-red-300">{error}</p>}
+      {toastMessage && <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />}
     </main>
   )
 }

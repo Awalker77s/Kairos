@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { updateProject } from '../../lib/projects'
 import { getRendersByProject } from '../../lib/renders'
 import { useAuth } from '../../context/AuthContext'
+import { exportProjectPDF } from '../../lib/export'
 import type { Project, RoomRender } from '../../types/supabase'
 
 const styles = ['Modern', 'Scandinavian', 'Industrial', 'Mid-Century', 'Farmhouse', 'Luxury', 'Minimalist']
@@ -126,6 +127,16 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
     }
   }
 
+
+  async function downloadPDFReport() {
+    setError(null)
+    try {
+      await exportProjectPDF(project, renders)
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : 'Unable to export PDF report.')
+    }
+  }
+
   async function goBackToModelStep() {
     setError(null)
     try {
@@ -182,14 +193,25 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
           {isGenerating ? 'Generating…' : 'Generate Room Renders'}
         </button>
         {renders.length > 0 && (
-          <button
-            type="button"
-            onClick={generateRoomRenders}
-            disabled={isGenerating}
-            className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Regenerate All
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={generateRoomRenders}
+              disabled={isGenerating}
+              className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Regenerate All
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void downloadPDFReport()
+              }}
+              className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+            >
+              Download PDF Report
+            </button>
+          </>
         )}
       </div>
 
