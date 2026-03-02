@@ -43,31 +43,56 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
     setError(null)
 
     try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      console.log('VITE_SUPABASE_URL', supabaseUrl)
+
       const {
         data: { session },
       } = await supabase.auth.getSession()
 
       if (!session?.access_token) {
-        throw new Error('You must be signed in to generate a floor plan.')
+        setError('Not authenticated')
+        return
       }
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`, {
+      const requestUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`
+      const requestHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      }
+      const requestBody = JSON.stringify({
+        projectId: project.id,
+        prompt: promptValue,
+      })
+
+      console.log('Generate floor plan request', {
+        url: requestUrl,
+        headers: requestHeaders,
+        body: requestBody,
+      })
+
+      const response = await fetch(requestUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          projectId: project.id,
-          prompt: promptValue,
-        }),
+        headers: requestHeaders,
+        body: requestBody,
+      })
+
+      const responseBody = await response.text()
+      console.log('Generate floor plan response', {
+        status: response.status,
+        body: responseBody,
       })
 
       if (!response.ok) {
-        throw new Error('Floor plan generation request failed.')
+        throw new Error(`Floor plan generation request failed: ${response.status} ${responseBody}`)
       }
 
-      const result = (await response.json()) as FloorPlanResponse
+      let result: FloorPlanResponse
+      try {
+        result = JSON.parse(responseBody) as FloorPlanResponse
+      } catch {
+        throw new Error(`Invalid response body: ${responseBody}`)
+      }
 
       if (!Array.isArray(result.rooms)) {
         throw new Error('Missing floor plan payload from generator.')
@@ -129,14 +154,14 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
         </button>
       </div>
 
+      {error && <p className="text-sm text-red-300">{error}</p>}
+
       {isGenerating && (
         <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
           Generating your floor plan…
         </div>
       )}
-
-      {error && <p className="text-sm text-red-300">{error}</p>}
 
       {project.floor_plan_json ? (
         <FloorPlanCanvas floorPlanJson={project.floor_plan_json} />
