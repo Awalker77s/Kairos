@@ -15,12 +15,12 @@ export function Layout({ children }: PropsWithChildren) {
             <NavItem to="/blog">Blog</NavItem>
           </div>
           <div className="flex items-center gap-3">
-            <button className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber">
+            <Link to="/signin" className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber">
               Sign In
-            </button>
-            <button className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber">
+            </Link>
+            <Link to="/signup" className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber">
               Get Started
-            </button>
+            </Link>
           </div>
         </nav>
       </header>
