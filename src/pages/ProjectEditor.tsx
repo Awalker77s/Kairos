@@ -126,49 +126,49 @@ export function ProjectEditor() {
 
   if (isLoading) {
     return (
-      <main className="mx-auto w-full max-w-6xl px-4 py-16">
-        <p className="text-stone">Loading project editor…</p>
+      <main className="mx-auto w-full max-w-6xl px-6 py-16">
+        <p className="text-warm-stone">Loading project editor&hellip;</p>
       </main>
     )
   }
 
   if (error && !project) {
     return (
-      <main className="mx-auto w-full max-w-6xl px-4 py-16">
-        <p className="text-red-300">{error}</p>
+      <main className="mx-auto w-full max-w-6xl px-6 py-16">
+        <p className="text-red-700">{error}</p>
       </main>
     )
   }
 
   if (!project) {
     return (
-      <main className="mx-auto w-full max-w-6xl px-4 py-16">
-        <p className="text-stone">Project not found.</p>
+      <main className="mx-auto w-full max-w-6xl px-6 py-16">
+        <p className="text-warm-stone">Project not found.</p>
       </main>
     )
   }
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-10">
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <main className="mx-auto w-full max-w-6xl px-6 py-12">
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="mb-2 text-xs uppercase tracking-wider text-stone">Project Editor</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-[0.15em] text-warm-stone">Project Editor</p>
           <input
             value={titleDraft}
             onChange={(event) => setTitleDraft(event.target.value)}
             onBlur={() => {
               void saveTitle()
             }}
-            className="min-w-[280px] rounded-lg border border-white/15 bg-black/20 px-3 py-2 text-2xl font-semibold text-white outline-none ring-brand/70 transition focus:ring"
+            className="min-w-[280px] rounded-lg border border-warm-border bg-warm-white px-3 py-2 font-serif text-2xl font-semibold text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
           />
-          <p className="mt-2 text-xs text-stone">{isSavingTitle ? 'Saving title…' : 'Title auto-saves on blur.'}</p>
+          <p className="mt-2 text-xs text-warm-stone">{isSavingTitle ? 'Saving title\u2026' : 'Title auto-saves on blur.'}</p>
         </div>
         <button
           type="button"
           onClick={() => {
             void shareProject()
           }}
-          className="rounded-full border border-white/20 px-4 py-2 text-sm font-medium text-white"
+          className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold hover:text-gold"
         >
           Share Project
         </button>
@@ -182,7 +182,7 @@ export function ProjectEditor() {
         {displayedStep === 3 && <Step3Renders project={project} onProjectChange={setProject} />}
       </div>
 
-      {error && <p className="mt-4 text-sm text-red-300">{error}</p>}
+      {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
       {toastMessage && <Toast message={toastMessage} onDismiss={() => setToastMessage(null)} />}
     </main>
   )

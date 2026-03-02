@@ -33,19 +33,19 @@ export function Step2Model3D({ project, onProjectChange }: Step2Model3DProps) {
   }
 
   return (
-    <section className="space-y-5 rounded-2xl border border-white/10 bg-black/20 p-6">
+    <section className="space-y-5 rounded-2xl border border-warm-border bg-warm-white p-6 shadow-sm">
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
           onClick={() => viewerRef.current?.toggleCeiling()}
-          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+          className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold"
         >
           Toggle Ceiling
         </button>
         <button
           type="button"
           onClick={() => viewerRef.current?.captureView()}
-          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+          className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold"
         >
           Capture View
         </button>
@@ -57,20 +57,20 @@ export function Step2Model3D({ project, onProjectChange }: Step2Model3DProps) {
         <button
           type="button"
           onClick={goBackToStep1}
-          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+          className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold"
         >
           Back to Floor Plan
         </button>
         <button
           type="button"
           onClick={goToStep3}
-          className="rounded-full bg-brand px-5 py-2 text-sm font-medium text-black"
+          className="rounded-full bg-gold px-5 py-2 text-sm font-medium text-warm-black transition hover:bg-gold-dark"
         >
           Proceed to Room Renders
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-300">{error}</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
     </section>
   )
 }

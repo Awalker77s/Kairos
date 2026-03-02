@@ -1,5 +1,9 @@
 import { serve } from 'std/http/server'
 import { createClient } from '@supabase/supabase-js'
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
 type FloorPlanRoom = {
   id: string
@@ -41,6 +45,7 @@ function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
+      ...corsHeaders,
       'Content-Type': 'application/json',
     },
   })
@@ -89,8 +94,12 @@ async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<
   return parseFloorPlanJson(content)
 }
 
-serve(async (request) => {
-  if (request.method !== 'POST') {
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  if (req.method !== 'POST') {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
@@ -102,7 +111,7 @@ serve(async (request) => {
     return jsonResponse({ error: 'Missing required environment variables.' }, 500)
   }
 
-  const authHeader = request.headers.get('Authorization')
+  const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
@@ -122,7 +131,7 @@ serve(async (request) => {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
 
-  const body = await request.json().catch(() => null)
+  const body = await req.json().catch(() => null)
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
   const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
 

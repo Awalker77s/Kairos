@@ -18,9 +18,30 @@ export async function createProject(prompt: string): Promise<Project> {
     throw new Error('Project prompt is required.')
   }
 
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession()
+
+  if (sessionError) {
+    console.error('Failed to read auth session before project creation.', sessionError)
+    throw sessionError
+  }
+
+  const userId = session?.user?.id
+
+  if (!userId) {
+    const authError = new Error('You must be signed in to create a project.')
+    console.error('Missing authenticated user while creating project.', {
+      session,
+    })
+    throw authError
+  }
+
   const { data, error } = await supabase
     .from(PROJECTS_TABLE)
     .insert({
+      user_id: userId,
       prompt: cleanPrompt,
       title: buildDefaultTitle(cleanPrompt),
       status: 'draft',
@@ -29,6 +50,17 @@ export async function createProject(prompt: string): Promise<Project> {
     .single()
 
   if (error) {
+    console.error('Supabase insert failed while creating project.', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+      error,
+      payload: {
+        user_id: userId,
+        prompt: cleanPrompt,
+      },
+    })
     throw error
   }
 
