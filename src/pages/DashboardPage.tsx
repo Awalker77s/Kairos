@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createProject, getProjects } from '../lib/projects'
+import { getRendersByProject } from '../lib/renders'
 import type { Project } from '../types/supabase'
 
 const statusLabelMap: Record<Project['status'], string> = {
@@ -20,6 +21,7 @@ const statusClasses: Record<Project['status'], string> = {
 export function DashboardPage() {
   const navigate = useNavigate()
   const [projects, setProjects] = useState<Project[]>([])
+  const [projectThumbnails, setProjectThumbnails] = useState<Record<string, string | null>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,6 +38,16 @@ export function DashboardPage() {
       try {
         const results = await getProjects()
         setProjects(results)
+
+        const thumbnails = await Promise.all(
+          results.map(async (project) => {
+            const renders = await getRendersByProject(project.id)
+            const firstImageUrl = renders.find((render) => render.image_url)?.image_url ?? null
+            return [project.id, firstImageUrl] as const
+          }),
+        )
+
+        setProjectThumbnails(Object.fromEntries(thumbnails))
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unable to load projects.')
       } finally {
@@ -115,26 +127,34 @@ export function DashboardPage() {
         </section>
       ) : (
         <section className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {formattedProjects.map((project) => (
-            <button
-              key={project.id}
-              type="button"
-              onClick={() => navigate(`/project/${project.id}`)}
-              className="overflow-hidden rounded-2xl border border-white/10 bg-charcoal/70 text-left transition hover:border-brand-orange/60"
-            >
-              <div className="flex h-36 items-center justify-center bg-brand-black/70 text-sm text-stone">Thumbnail</div>
-              <div className="space-y-3 p-4">
-                <h2 className="truncate text-lg font-semibold text-off-white">{project.title || 'Untitled Project'}</h2>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className={`rounded-full px-2.5 py-1 font-medium ${statusClasses[project.status]}`}>
-                    {statusLabelMap[project.status]}
-                  </span>
-                  <span className="rounded-full bg-white/10 px-2.5 py-1 text-stone">{project.style || 'No style set'}</span>
+          {formattedProjects.map((project) => {
+            const thumbnailUrl = projectThumbnails[project.id]
+
+            return (
+              <button
+                key={project.id}
+                type="button"
+                onClick={() => navigate(`/project/${project.id}`)}
+                className="overflow-hidden rounded-2xl border border-white/10 bg-charcoal/70 text-left transition hover:border-brand-orange/60"
+              >
+                {thumbnailUrl ? (
+                  <img src={thumbnailUrl} alt={`${project.title || 'Project'} render thumbnail`} className="h-36 w-full object-cover" />
+                ) : (
+                  <div className="h-36 bg-gradient-to-br from-brand-orange/40 via-fuchsia-500/20 to-sky-500/40" />
+                )}
+                <div className="space-y-3 p-4">
+                  <h2 className="truncate text-lg font-semibold text-off-white">{project.title || 'Untitled Project'}</h2>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`rounded-full px-2.5 py-1 font-medium ${statusClasses[project.status]}`}>
+                      {statusLabelMap[project.status]}
+                    </span>
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-stone">{project.style || 'No style set'}</span>
+                  </div>
+                  <p className="text-xs text-stone">Created {project.createdDate}</p>
                 </div>
-                <p className="text-xs text-stone">Created {project.createdDate}</p>
-              </div>
-            </button>
-          ))}
+              </button>
+            )
+          })}
         </section>
       )}
 

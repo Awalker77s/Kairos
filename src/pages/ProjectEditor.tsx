@@ -53,6 +53,22 @@ export function ProjectEditor() {
   }, [id])
 
   const activeStep = useMemo(() => (project ? getStepFromStatus(project.status) : 1), [project])
+  const [displayedStep, setDisplayedStep] = useState(activeStep)
+  const [isStepVisible, setIsStepVisible] = useState(true)
+
+  useEffect(() => {
+    if (activeStep === displayedStep) {
+      return
+    }
+
+    setIsStepVisible(false)
+    const timeoutId = window.setTimeout(() => {
+      setDisplayedStep(activeStep)
+      setIsStepVisible(true)
+    }, 180)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeStep, displayedStep])
 
   async function saveTitle() {
     if (!project) {
@@ -123,9 +139,11 @@ export function ProjectEditor() {
 
       <StepIndicator status={project.status} />
 
-      {activeStep === 1 && <Step1FloorPlan project={project} onProjectChange={setProject} />}
-      {activeStep === 2 && <Step2Model3D project={project} onProjectChange={setProject} />}
-      {activeStep === 3 && <Step3Renders project={project} onProjectChange={setProject} />}
+      <div className={`transition-opacity duration-200 ${isStepVisible ? 'opacity-100' : 'opacity-0'}`}>
+        {displayedStep === 1 && <Step1FloorPlan project={project} onProjectChange={setProject} />}
+        {displayedStep === 2 && <Step2Model3D project={project} onProjectChange={setProject} />}
+        {displayedStep === 3 && <Step3Renders project={project} onProjectChange={setProject} />}
+      </div>
 
       {error && <p className="mt-4 text-sm text-red-300">{error}</p>}
     </main>
