@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { updateProject } from '../../lib/projects'
+import { supabase } from '../../lib/supabase'
 import { FloorPlanCanvas } from '../FloorPlanCanvas'
 import type { Project } from '../../types/supabase'
 
@@ -8,9 +9,7 @@ type Step1FloorPlanProps = {
   onProjectChange: (project: Project) => void
 }
 
-type FloorPlanResponse = {
-  floor_plan_json: Record<string, unknown>
-}
+type FloorPlanResponse = Record<string, unknown>
 
 export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps) {
   const [promptValue, setPromptValue] = useState(project.prompt)
@@ -44,10 +43,19 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
     setError(null)
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!session?.access_token) {
+        throw new Error('You must be signed in to generate a floor plan.')
+      }
+
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           projectId: project.id,
@@ -61,13 +69,13 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
 
       const result = (await response.json()) as FloorPlanResponse
 
-      if (!result.floor_plan_json) {
+      if (!Array.isArray(result.rooms)) {
         throw new Error('Missing floor plan payload from generator.')
       }
 
       const updated = await updateProject(project.id, {
         prompt: promptValue.trim(),
-        floor_plan_json: result.floor_plan_json,
+        floor_plan_json: result,
         status: 'floor_plan',
       })
 
