@@ -16,7 +16,7 @@ export function Layout({ children }: PropsWithChildren) {
           <div className="hidden items-center gap-8 md:flex">
             <NavItem to="/">Features</NavItem>
             <NavItem to="/pricing">Pricing</NavItem>
-            <NavItem to="/blog">Blog</NavItem>
+            
           </div>
           <div className="flex items-center gap-3">
             {user ? (
@@ -26,6 +26,12 @@ export function Layout({ children }: PropsWithChildren) {
                   className="rounded-lg border border-warm-border px-4 py-2 text-sm font-medium text-warm-black transition hover:border-gold hover:text-gold"
                 >
                   Dashboard
+                </Link>
+                <Link
+                  to="/billing"
+                  className="rounded-lg border border-warm-border px-4 py-2 text-sm font-medium text-warm-black transition hover:border-gold hover:text-gold"
+                >
+                  Billing
                 </Link>
                 <button
                   type="button"

@@ -16,9 +16,10 @@ type RoomData = {
 type Step3RendersProps = {
   project: Project
   onProjectChange: (project: Project) => void
+  exportsEnabled: boolean
 }
 
-export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
+export function Step3Renders({ project, onProjectChange, exportsEnabled }: Step3RendersProps) {
   const { session } = useAuth()
   const [isGenerating, setIsGenerating] = useState(false)
   const [isLoadingRenders, setIsLoadingRenders] = useState(true)
@@ -206,12 +207,13 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
             </button>
             <button
               type="button"
+              disabled={!exportsEnabled}
               onClick={() => {
                 void downloadPDFReport()
               }}
-              className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold"
+              className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Download PDF Report
+              {exportsEnabled ? 'Download PDF Report' : 'Upgrade to export PDFs'}
             </button>
           </>
         )}

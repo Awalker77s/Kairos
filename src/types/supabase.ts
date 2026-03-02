@@ -24,3 +24,16 @@ export type RoomRender = {
   status: RoomRenderStatus
   created_at: string
 }
+
+export type Transaction = {
+  id: string
+  project_id: string
+  user_id: string
+  amount_cents: number
+  currency: string
+  stripe_payment_intent_id: string | null
+  status: 'pending' | 'succeeded' | 'refunded'
+  platform_fee_cents: number
+  net_amount_cents: number
+  created_at: string
+}

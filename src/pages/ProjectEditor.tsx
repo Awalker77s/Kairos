@@ -6,6 +6,7 @@ import { Step1FloorPlan } from '../components/steps/Step1FloorPlan'
 import { Step2Model3D } from '../components/steps/Step2Model3D'
 import { Step3Renders } from '../components/steps/Step3Renders'
 import { getProject, updateProject } from '../lib/projects'
+import { getUserPlan } from '../lib/billing'
 import type { Project } from '../types/supabase'
 
 function getStepFromStatus(status: Project['status']) {
@@ -28,6 +29,7 @@ export function ProjectEditor() {
   const [isSavingTitle, setIsSavingTitle] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toastMessage, setToastMessage] = useState<string | null>(null)
+  const [exportsEnabled, setExportsEnabled] = useState(true)
 
   useEffect(() => {
     async function loadProject(projectId: string) {
@@ -35,8 +37,9 @@ export function ProjectEditor() {
       setError(null)
 
       try {
-        const loadedProject = await getProject(projectId)
+        const [loadedProject, plan] = await Promise.all([getProject(projectId), getUserPlan()])
         setProject(loadedProject)
+        setExportsEnabled(plan.entitlements.exportsEnabled)
         setTitleDraft(loadedProject.title)
       } catch (loadError) {
         setError(loadError instanceof Error ? loadError.message : 'Failed to load project.')
@@ -179,7 +182,7 @@ export function ProjectEditor() {
       <div className={`transition-opacity duration-200 ${isStepVisible ? 'opacity-100' : 'opacity-0'}`}>
         {displayedStep === 1 && <Step1FloorPlan project={project} onProjectChange={setProject} />}
         {displayedStep === 2 && <Step2Model3D project={project} onProjectChange={setProject} />}
-        {displayedStep === 3 && <Step3Renders project={project} onProjectChange={setProject} />}
+        {displayedStep === 3 && <Step3Renders project={project} onProjectChange={setProject} exportsEnabled={exportsEnabled} />}
       </div>
 
       {error && <p className="mt-4 text-sm text-red-700">{error}</p>}
