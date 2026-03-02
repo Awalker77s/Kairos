@@ -91,14 +91,14 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
 
   if (!hasFloorPlan) {
     return (
-      <div className="flex min-h-[420px] items-center justify-center rounded-xl border border-dashed border-white/20 bg-white/5 text-stone">
+      <div className="flex min-h-[420px] items-center justify-center rounded-xl border-2 border-dashed border-warm-border bg-cream text-warm-stone">
         Generate a floor plan first
       </div>
     )
   }
 
   return (
-    <div className="h-[520px] overflow-hidden rounded-xl border border-white/10 bg-black/40">
+    <div className="h-[520px] overflow-hidden rounded-xl border border-warm-border bg-cream-dark">
       <Canvas
         shadows
         camera={{
@@ -108,7 +108,7 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
           far: 1000,
         }}
       >
-        <color attach="background" args={['#111111']} />
+        <color attach="background" args={['#F0EAE0']} />
         <ambientLight intensity={0.6} />
         <directionalLight castShadow intensity={0.8} position={[bounds.centerX + bounds.span * 0.7, 20, -bounds.centerY - bounds.span * 0.7]} />
 

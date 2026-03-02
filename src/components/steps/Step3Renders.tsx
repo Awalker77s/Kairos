@@ -152,9 +152,9 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
   }, [renders])
 
   return (
-    <section className="space-y-5 rounded-2xl border border-white/10 bg-black/20 p-6">
+    <section className="space-y-5 rounded-2xl border border-warm-border bg-warm-white p-6 shadow-sm">
       <div>
-        <p className="mb-3 text-sm text-stone">Pick a style to guide photorealistic room renders.</p>
+        <p className="mb-3 text-sm text-warm-stone">Pick a style to guide photorealistic room renders.</p>
         <div className="flex flex-wrap gap-2">
           {styles.map((style) => {
             const isActive = style === project.style
@@ -166,7 +166,9 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
                   void selectStyle(style)
                 }}
                 className={`rounded-full border px-4 py-1.5 text-sm transition ${
-                  isActive ? 'border-brand bg-brand/20 text-white' : 'border-white/20 text-stone hover:border-white/40 hover:text-white'
+                  isActive
+                    ? 'border-gold bg-gold/15 text-warm-black'
+                    : 'border-warm-border text-warm-stone hover:border-gold hover:text-warm-black'
                 }`}
               >
                 {style}
@@ -180,7 +182,7 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
         <button
           type="button"
           onClick={goBackToModelStep}
-          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+          className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold"
         >
           Back to 3D Model
         </button>
@@ -188,9 +190,9 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
           type="button"
           onClick={generateRoomRenders}
           disabled={isGenerating || rooms.length === 0}
-          className="rounded-full bg-brand px-5 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-full bg-gold px-5 py-2 text-sm font-medium text-warm-black transition hover:bg-gold-dark disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {isGenerating ? 'Generating…' : 'Generate Room Renders'}
+          {isGenerating ? 'Generating\u2026' : 'Generate Room Renders'}
         </button>
         {renders.length > 0 && (
           <>
@@ -198,7 +200,7 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
               type="button"
               onClick={generateRoomRenders}
               disabled={isGenerating}
-              className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold disabled:cursor-not-allowed disabled:opacity-60"
             >
               Regenerate All
             </button>
@@ -207,7 +209,7 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
               onClick={() => {
                 void downloadPDFReport()
               }}
-              className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+              className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold"
             >
               Download PDF Report
             </button>
@@ -216,22 +218,22 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
       </div>
 
       {isLoadingRenders ? (
-        <p className="text-sm text-stone">Loading existing renders…</p>
+        <p className="text-sm text-warm-stone">Loading existing renders&hellip;</p>
       ) : rooms.length === 0 ? (
-        <p className="text-sm text-stone">No rooms available yet. Generate a floor plan first.</p>
+        <p className="text-sm text-warm-stone">No rooms available yet. Generate a floor plan first.</p>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {rooms.map((room) => {
             const render = renderByRoomName.get(room.name)
 
             if (isGenerating && !render) {
               return (
-                <article key={room.id} className="rounded-xl border border-white/15 bg-white/5 p-4">
-                  <h3 className="font-medium text-white">{room.name}</h3>
-                  <p className="mt-1 text-sm text-stone">{room.type}</p>
-                  <div className="mt-4 flex h-52 flex-col items-center justify-center rounded-lg border border-dashed border-white/20 bg-black/20 text-stone">
-                    <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/40 border-t-brand" />
-                    <p className="text-xs">Generating render…</p>
+                <article key={room.id} className="rounded-xl border border-warm-border bg-cream p-4">
+                  <h3 className="font-medium text-warm-black">{room.name}</h3>
+                  <p className="mt-1 text-sm text-warm-stone">{room.type}</p>
+                  <div className="mt-4 flex h-52 flex-col items-center justify-center rounded-lg border-2 border-dashed border-warm-border bg-warm-white text-warm-stone">
+                    <div className="mb-3 h-8 w-8 animate-spin rounded-full border-2 border-warm-border border-t-gold" />
+                    <p className="text-xs">Generating render&hellip;</p>
                   </div>
                 </article>
               )
@@ -240,24 +242,24 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
             return (
               <article
                 key={room.id}
-                className="cursor-pointer rounded-xl border border-white/15 bg-white/5 p-3 transition hover:border-white/30"
+                className="cursor-pointer rounded-xl border border-warm-border bg-cream p-3 transition hover:border-gold hover:shadow-md"
                 onClick={() => {
                   if (render?.image_url) {
                     setSelectedRender(render)
                   }
                 }}
               >
-                <div className="aspect-square overflow-hidden rounded-lg bg-black/20">
+                <div className="aspect-square overflow-hidden rounded-lg bg-cream-dark">
                   {render?.image_url ? (
                     <img src={render.image_url} alt={room.name} className="h-full w-full object-cover" />
                   ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-stone">No render yet</div>
+                    <div className="flex h-full items-center justify-center text-xs text-warm-stone">No render yet</div>
                   )}
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <div>
-                    <h3 className="font-medium text-white">{room.name}</h3>
-                    <p className="text-sm text-stone">{room.type}</p>
+                    <h3 className="font-medium text-warm-black">{room.name}</h3>
+                    <p className="text-sm text-warm-stone">{room.type}</p>
                   </div>
                   {render?.image_url && (
                     <a
@@ -266,7 +268,7 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
                       onClick={(event) => {
                         event.stopPropagation()
                       }}
-                      className="rounded-full border border-white/25 px-3 py-1.5 text-xs text-white"
+                      className="rounded-full border border-warm-border px-3 py-1.5 text-xs text-warm-black transition hover:border-gold"
                     >
                       Download
                     </a>
@@ -288,18 +290,18 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
               setSelectedRender(null)
             }
           }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-warm-black/80 p-6 backdrop-blur-sm"
         >
-          <div className="max-h-full w-full max-w-4xl overflow-auto rounded-xl border border-white/15 bg-black p-4">
-            <div className="mb-3 flex items-start justify-between gap-4">
+          <div className="max-h-full w-full max-w-4xl overflow-auto rounded-xl border border-warm-border bg-warm-white p-5">
+            <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold text-white">{selectedRender.room_name}</h3>
-                <p className="mt-1 text-xs text-stone">{selectedRender.prompt_used}</p>
+                <h3 className="font-serif text-lg font-semibold text-warm-black">{selectedRender.room_name}</h3>
+                <p className="mt-1 text-xs text-warm-stone">{selectedRender.prompt_used}</p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedRender(null)}
-                className="rounded-full border border-white/20 px-3 py-1 text-xs text-white"
+                className="rounded-full border border-warm-border px-3 py-1 text-xs text-warm-black transition hover:border-gold"
               >
                 Close
               </button>
@@ -309,7 +311,7 @@ export function Step3Renders({ project, onProjectChange }: Step3RendersProps) {
         </div>
       )}
 
-      {error && <p className="text-sm text-red-300">{error}</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
     </section>
   )
 }

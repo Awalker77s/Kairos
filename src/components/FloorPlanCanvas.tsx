@@ -71,7 +71,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
 
   if (!rooms.length) {
     return (
-      <div className="rounded-xl border border-white/10 bg-black/20 p-6 text-sm text-stone">
+      <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
         Floor plan data is missing room geometry.
       </div>
     )
@@ -87,7 +87,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   const viewHeight = bounds.height + PADDING * 2
 
   return (
-    <div className="w-full max-w-[800px] overflow-hidden rounded-xl border border-white/10 bg-black/30">
+    <div className="w-full max-w-[800px] overflow-hidden rounded-xl border border-warm-border bg-warm-white">
       <svg
         className="h-auto w-full"
         viewBox={`0 0 ${viewWidth} ${viewHeight}`}
@@ -97,7 +97,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
       >
         <defs>
           <pattern id="grid" width="4" height="4" patternUnits="userSpaceOnUse">
-            <path d="M 4 0 L 0 0 0 4" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.08" />
+            <path d="M 4 0 L 0 0 0 4" fill="none" stroke="rgba(28,20,16,0.06)" strokeWidth="0.08" />
           </pattern>
         </defs>
 
@@ -111,15 +111,15 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                 y={room.y}
                 width={room.width}
                 height={room.height}
-                fill="#1A1A1A"
-                stroke="#FF6A00"
+                fill="#FAF7F2"
+                stroke="#C9A84C"
                 strokeWidth={0.2}
                 rx={0.2}
               />
               <text
                 x={room.x + room.width / 2}
                 y={room.y + room.height / 2}
-                fill="#F3EEE8"
+                fill="#1C1410"
                 fontSize={1.2}
                 textAnchor="middle"
                 dominantBaseline="middle"
@@ -129,12 +129,12 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
               <text
                 x={room.x + room.width / 2}
                 y={room.y + room.height / 2 + 1.5}
-                fill="#F3EEE8"
+                fill="#9C8E82"
                 fontSize={0.8}
                 textAnchor="middle"
                 dominantBaseline="middle"
               >
-                {`${room.width}' × ${room.height}'`}
+                {`${room.width}' \u00d7 ${room.height}'`}
               </text>
             </g>
           ))}
@@ -156,7 +156,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                     : `M ${segment.x1} ${segment.y1} A ${door.width} ${door.width} 0 0 ${arcSweep} ${segment.x2} ${segment.y2}`
                 }
                 fill="none"
-                stroke="#F3EEE8"
+                stroke="#6B3F2A"
                 strokeWidth={0.15}
               />
             )
@@ -173,7 +173,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
               const y = segment.y1
               const windowOffset = windowItem.wall === 'top' ? -offset : offset
               return (
-                <g key={windowItem.id} stroke="#F3EEE8" strokeWidth={0.12}>
+                <g key={windowItem.id} stroke="#8B5E3C" strokeWidth={0.12}>
                   <line x1={segment.x1} y1={y - windowOffset} x2={segment.x2} y2={y - windowOffset} />
                   <line x1={segment.x1} y1={y + windowOffset} x2={segment.x2} y2={y + windowOffset} />
                 </g>
@@ -183,7 +183,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
             const x = segment.x1
             const windowOffset = windowItem.wall === 'left' ? -offset : offset
             return (
-              <g key={windowItem.id} stroke="#F3EEE8" strokeWidth={0.12}>
+              <g key={windowItem.id} stroke="#8B5E3C" strokeWidth={0.12}>
                 <line x1={x - windowOffset} y1={segment.y1} x2={x - windowOffset} y2={segment.y2} />
                 <line x1={x + windowOffset} y1={segment.y1} x2={x + windowOffset} y2={segment.y2} />
               </g>

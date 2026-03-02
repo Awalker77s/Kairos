@@ -1,18 +1,19 @@
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
 import type { PropsWithChildren } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 export function Layout({ children }: PropsWithChildren) {
   const { user, signOut } = useAuth()
+  const navigate = useNavigate()
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-white/10 bg-brand-black/80 backdrop-blur">
-        <nav className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4">
-          <Link to="/" className="text-xl font-bold text-off-white">
-            Kairo
+    <div className="min-h-screen bg-cream">
+      <header className="border-b border-warm-border bg-cream/90 backdrop-blur-sm">
+        <nav className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
+          <Link to="/" className="font-serif text-2xl font-bold tracking-tight text-warm-black">
+            Kairos
           </Link>
-          <div className="hidden items-center gap-6 md:flex">
+          <div className="hidden items-center gap-8 md:flex">
             <NavItem to="/">Features</NavItem>
             <NavItem to="/pricing">Pricing</NavItem>
             <NavItem to="/blog">Blog</NavItem>
@@ -22,28 +23,31 @@ export function Layout({ children }: PropsWithChildren) {
               <>
                 <Link
                   to="/dashboard"
-                  className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber"
+                  className="rounded-lg border border-warm-border px-4 py-2 text-sm font-medium text-warm-black transition hover:border-gold hover:text-gold"
                 >
                   Dashboard
                 </Link>
                 <button
                   type="button"
                   onClick={() => {
-                    void signOut()
+                    void signOut().then(() => navigate('/'))
                   }}
-                  className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber"
+                  className="rounded-lg bg-cognac px-4 py-2 text-sm font-semibold text-cream transition hover:bg-cognac-light"
                 >
                   Sign Out
                 </button>
               </>
             ) : (
               <>
-                <Link to="/signin" className="rounded-lg border border-white/20 px-4 py-2 text-sm text-off-white hover:border-amber">
+                <Link
+                  to="/signin"
+                  className="rounded-lg border border-warm-border px-4 py-2 text-sm font-medium text-warm-black transition hover:border-gold hover:text-gold"
+                >
                   Sign In
                 </Link>
                 <Link
                   to="/signup"
-                  className="rounded-lg bg-brand-orange px-4 py-2 text-sm font-semibold text-brand-black hover:bg-amber"
+                  className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-warm-black transition hover:bg-gold-dark"
                 >
                   Get Started
                 </Link>
@@ -55,17 +59,19 @@ export function Layout({ children }: PropsWithChildren) {
 
       {children}
 
-      <footer className="mt-16 border-t border-white/10">
-        <div className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-8 text-sm text-stone md:grid-cols-2">
-          <p>© {new Date().getFullYear()} Kairo. From sketch to stunning in seconds.</p>
-          <div className="flex gap-4 md:justify-end">
-            <a href="#" className="hover:text-amber">
+      <footer className="mt-20 border-t border-cognac/20 bg-cognac">
+        <div className="mx-auto grid w-full max-w-6xl gap-4 px-6 py-10 text-sm text-cream/80 md:grid-cols-2">
+          <p className="font-serif text-base text-cream">
+            &copy; {new Date().getFullYear()} Kairos. From sketch to stunning in seconds.
+          </p>
+          <div className="flex gap-6 md:justify-end">
+            <a href="#" className="transition hover:text-gold-light">
               Docs
             </a>
-            <a href="#" className="hover:text-amber">
+            <a href="#" className="transition hover:text-gold-light">
               Privacy
             </a>
-            <a href="#" className="hover:text-amber">
+            <a href="#" className="transition hover:text-gold-light">
               Contact
             </a>
           </div>
@@ -77,7 +83,12 @@ export function Layout({ children }: PropsWithChildren) {
 
 function NavItem({ to, children }: PropsWithChildren<{ to: string }>) {
   return (
-    <NavLink to={to} className="text-sm text-stone transition-colors hover:text-off-white">
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        `text-sm font-medium transition-colors ${isActive ? 'text-gold' : 'text-warm-stone hover:text-warm-black'}`
+      }
+    >
       {children}
     </NavLink>
   )

@@ -31,7 +31,7 @@ export function StepIndicator({ status }: StepIndicatorProps) {
   const activeStep = getStepFromStatus(status)
 
   return (
-    <ol className="mb-8 grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 md:grid-cols-3">
+    <ol className="mb-8 grid gap-3 rounded-2xl border border-warm-border bg-warm-white p-4 md:grid-cols-3">
       {steps.map((step) => {
         const isActive = step.id === activeStep
         const isCompleted = step.id < activeStep
@@ -41,10 +41,10 @@ export function StepIndicator({ status }: StepIndicatorProps) {
             key={step.id}
             className={`rounded-xl border px-4 py-3 text-sm transition ${
               isActive
-                ? 'border-brand bg-brand/20 text-white'
+                ? 'border-gold bg-gold/10 text-warm-black'
                 : isCompleted
-                  ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200'
-                  : 'border-white/10 bg-white/5 text-stone'
+                  ? 'border-emerald-400/40 bg-emerald-50 text-emerald-700'
+                  : 'border-warm-border bg-cream text-warm-stone'
             }`}
           >
             <p className="font-medium">Step {step.id}</p>
