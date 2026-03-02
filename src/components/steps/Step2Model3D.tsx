@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { ThreeJSViewer, type ThreeJSViewerHandle } from '../ThreeJSViewer'
 import { updateProject } from '../../lib/projects'
 import type { Project } from '../../types/supabase'
 
@@ -9,6 +10,7 @@ type Step2Model3DProps = {
 
 export function Step2Model3D({ project, onProjectChange }: Step2Model3DProps) {
   const [error, setError] = useState<string | null>(null)
+  const viewerRef = useRef<ThreeJSViewerHandle>(null)
 
   async function goToStep3() {
     setError(null)
@@ -32,9 +34,24 @@ export function Step2Model3D({ project, onProjectChange }: Step2Model3DProps) {
 
   return (
     <section className="space-y-5 rounded-2xl border border-white/10 bg-black/20 p-6">
-      <div className="rounded-xl border border-dashed border-white/20 bg-white/5 p-10 text-center text-stone">
-        3D Viewer — coming next
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="button"
+          onClick={() => viewerRef.current?.toggleCeiling()}
+          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+        >
+          Toggle Ceiling
+        </button>
+        <button
+          type="button"
+          onClick={() => viewerRef.current?.captureView()}
+          className="rounded-full border border-white/20 px-5 py-2 text-sm font-medium text-white"
+        >
+          Capture View
+        </button>
       </div>
+
+      <ThreeJSViewer ref={viewerRef} floorPlanJson={project.floor_plan_json} />
 
       <div className="flex flex-wrap gap-3">
         <button
