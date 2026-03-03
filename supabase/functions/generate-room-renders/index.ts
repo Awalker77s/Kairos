@@ -115,159 +115,170 @@ serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
-  const authHeader = request.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return jsonResponse({ error: 'Unauthorized.' }, 401)
-  }
-
-  const token = authHeader.replace('Bearer ', '').trim()
-
-  // Decode JWT payload to get user ID (gateway already verified the token)
-  let userId: string
   try {
-    const payloadBase64 = token.split('.')[1]
-    const payload = JSON.parse(atob(payloadBase64))
-    userId = payload.sub
-    if (!userId) throw new Error('No subject in token')
-  } catch {
-    return jsonResponse({ error: 'Invalid token.' }, 401)
-  }
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader?.startsWith('Bearer ')) {
+      return jsonResponse({ error: 'Unauthorized.' }, 401)
+    }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
+    const token = authHeader.replace('Bearer ', '').trim()
 
-  const adminClient = createClient(supabaseUrl, serviceRoleKey)
-
-  const body = await request.json().catch(() => null)
-  const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
-  const style = typeof body?.style === 'string' ? body.style.trim() : ''
-
-  if (!projectId || !style) {
-    return jsonResponse({ error: 'Missing required fields: projectId and style.' }, 400)
-  }
-
-  const { data: project, error: projectError } = await adminClient
-    .from('projects')
-    .select('id, user_id, floor_plan_json')
-    .eq('id', projectId)
-    .eq('user_id', userId)
-    .single()
-
-  if (projectError || !project) {
-    return jsonResponse({ error: 'Project not found.' }, 404)
-  }
-
-  const rooms = parseRooms(project.floor_plan_json as FloorPlanJson)
-  if (rooms.length === 0) {
-    return jsonResponse({ error: 'No rooms found on this project floor plan.' }, 400)
-  }
-
-  const collectedRenders: RoomRender[] = []
-
-  for (const room of rooms) {
-    const prompt = `Photorealistic interior render of a ${style} ${room.type}, ${room.width}ft x ${room.height}ft, fully furnished and decorated, natural lighting, high detail, architectural visualization style`
-
+    let userId: string
     try {
-      const openAiImageUrl = await generateImage(openAiApiKey, prompt)
-      const imageResponse = await fetch(openAiImageUrl)
+      const parts = token.split('.')
+      if (parts.length !== 3) throw new Error('Malformed JWT')
 
-      if (!imageResponse.ok) {
-        throw new Error(`Unable to download generated image (${imageResponse.status}).`)
-      }
+      // Fix URL-safe base64 to standard base64
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+      const payload = JSON.parse(atob(padded))
 
-      const imageBuffer = await imageResponse.arrayBuffer()
-      const storagePath = `${userId}/${projectId}/${room.id}.png`
+      userId = payload.sub
+      if (!userId) throw new Error('No subject in token')
+    } catch (e) {
+      console.error('JWT decode error:', e)
+      return jsonResponse({ error: 'Invalid token.' }, 401)
+    }
 
-      const { error: uploadError } = await adminClient.storage.from('room-renders').upload(storagePath, imageBuffer, {
-        contentType: 'image/png',
-        upsert: true,
-      })
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
 
-      if (uploadError) {
-        throw new Error(uploadError.message)
-      }
+    const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
-      const { data: publicUrlData } = adminClient.storage.from('room-renders').getPublicUrl(storagePath)
+    const body = await request.json().catch(() => null)
+    const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
+    const style = typeof body?.style === 'string' ? body.style.trim() : ''
 
-      const renderPayload = {
-        project_id: projectId,
-        room_name: room.name,
-        room_type: room.type,
-        image_url: publicUrlData.publicUrl,
-        prompt_used: prompt,
-        status: 'complete',
-      }
+    if (!projectId || !style) {
+      return jsonResponse({ error: 'Missing required fields: projectId and style.' }, 400)
+    }
 
-      const { data: existingRender } = await adminClient
-        .from('room_renders')
-        .select('id')
-        .eq('project_id', projectId)
-        .eq('room_name', room.name)
-        .maybeSingle()
+    const { data: project, error: projectError } = await adminClient
+      .from('projects')
+      .select('id, user_id, floor_plan_json')
+      .eq('id', projectId)
+      .eq('user_id', userId)
+      .single()
 
-      let renderRecord: RoomRender | null = null
+    if (projectError || !project) {
+      return jsonResponse({ error: 'Project not found.' }, 404)
+    }
 
-      if (existingRender?.id) {
-        const { data: updatedRender, error: updateError } = await adminClient
-          .from('room_renders')
-          .update(renderPayload)
-          .eq('id', existingRender.id)
-          .select('*')
-          .single()
+    const rooms = parseRooms(project.floor_plan_json as FloorPlanJson)
+    if (rooms.length === 0) {
+      return jsonResponse({ error: 'No rooms found on this project floor plan.' }, 400)
+    }
 
-        if (updateError) {
-          throw new Error(updateError.message)
+    const collectedRenders: RoomRender[] = []
+
+    for (const room of rooms) {
+      const prompt = `Photorealistic interior render of a ${style} ${room.type}, ${room.width}ft x ${room.height}ft, fully furnished and decorated, natural lighting, high detail, architectural visualization style`
+
+      try {
+        const openAiImageUrl = await generateImage(openAiApiKey, prompt)
+        const imageResponse = await fetch(openAiImageUrl)
+
+        if (!imageResponse.ok) {
+          throw new Error(`Unable to download generated image (${imageResponse.status}).`)
         }
 
-        renderRecord = updatedRender as RoomRender
-      } else {
-        const { data: insertedRender, error: insertError } = await adminClient
-          .from('room_renders')
-          .insert(renderPayload)
-          .select('*')
-          .single()
+        const imageBuffer = await imageResponse.arrayBuffer()
+        const storagePath = `${userId}/${projectId}/${room.id}.png`
 
-        if (insertError) {
-          throw new Error(insertError.message)
+        const { error: uploadError } = await adminClient.storage.from('room-renders').upload(storagePath, imageBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        })
+
+        if (uploadError) {
+          throw new Error(uploadError.message)
         }
 
-        renderRecord = insertedRender as RoomRender
-      }
+        const { data: publicUrlData } = adminClient.storage.from('room-renders').getPublicUrl(storagePath)
 
-      if (renderRecord) {
-        collectedRenders.push(renderRecord)
-      }
-    } catch (roomError) {
-      const message = roomError instanceof Error ? roomError.message : 'Unexpected render generation failure.'
-
-      await adminClient.from('room_renders').upsert(
-        {
+        const renderPayload = {
           project_id: projectId,
           room_name: room.name,
           room_type: room.type,
-          image_url: null,
+          image_url: publicUrlData.publicUrl,
           prompt_used: prompt,
-          status: 'error',
-        },
-        {
-          onConflict: 'project_id,room_name',
-        },
-      )
+          status: 'complete',
+        }
 
-      return jsonResponse({ error: `Failed generating ${room.name}: ${message}` }, 502)
+        const { data: existingRender } = await adminClient
+          .from('room_renders')
+          .select('id')
+          .eq('project_id', projectId)
+          .eq('room_name', room.name)
+          .maybeSingle()
+
+        let renderRecord: RoomRender | null = null
+
+        if (existingRender?.id) {
+          const { data: updatedRender, error: updateError } = await adminClient
+            .from('room_renders')
+            .update(renderPayload)
+            .eq('id', existingRender.id)
+            .select('*')
+            .single()
+
+          if (updateError) {
+            throw new Error(updateError.message)
+          }
+
+          renderRecord = updatedRender as RoomRender
+        } else {
+          const { data: insertedRender, error: insertError } = await adminClient
+            .from('room_renders')
+            .insert(renderPayload)
+            .select('*')
+            .single()
+
+          if (insertError) {
+            throw new Error(insertError.message)
+          }
+
+          renderRecord = insertedRender as RoomRender
+        }
+
+        if (renderRecord) {
+          collectedRenders.push(renderRecord)
+        }
+      } catch (roomError) {
+        const message = roomError instanceof Error ? roomError.message : 'Unexpected render generation failure.'
+
+        await adminClient.from('room_renders').upsert(
+          {
+            project_id: projectId,
+            room_name: room.name,
+            room_type: room.type,
+            image_url: null,
+            prompt_used: prompt,
+            status: 'error',
+          },
+          {
+            onConflict: 'project_id,room_name',
+          },
+        )
+
+        return jsonResponse({ error: `Failed generating ${room.name}: ${message}` }, 502)
+      }
     }
+
+    const { error: projectUpdateError } = await adminClient
+      .from('projects')
+      .update({ status: 'rendered' })
+      .eq('id', projectId)
+      .eq('user_id', userId)
+
+    if (projectUpdateError) {
+      return jsonResponse({ error: projectUpdateError.message }, 500)
+    }
+
+    return jsonResponse({ success: true, renders: collectedRenders })
+  } catch (e) {
+    console.error('Unhandled error:', e)
+    return jsonResponse({ error: 'Internal server error' }, 500)
   }
-
-  const { error: projectUpdateError } = await adminClient
-    .from('projects')
-    .update({ status: 'rendered' })
-    .eq('id', projectId)
-    .eq('user_id', userId)
-
-  if (projectUpdateError) {
-    return jsonResponse({ error: projectUpdateError.message }, 500)
-  }
-
-  return jsonResponse({ success: true, renders: collectedRenders })
 })
