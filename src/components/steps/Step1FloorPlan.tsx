@@ -47,15 +47,15 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
         data: { session },
       } = await supabase.auth.getSession()
 
-      if (!session?.access_token) {
-        throw new Error('You must be signed in to generate a floor plan.')
-      }
+      if (!session) throw new Error('Not authenticated')
+
+      console.log('session.access_token', session.access_token)
 
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           projectId: project.id,
