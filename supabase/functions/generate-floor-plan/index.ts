@@ -108,67 +108,78 @@ serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
-  const authHeader = request.headers.get('Authorization')
-  if (!authHeader?.startsWith('Bearer ')) {
-    return jsonResponse({ error: 'Unauthorized.' }, 401)
-  }
-
-  const token = authHeader.replace('Bearer ', '').trim()
-
-  // Decode JWT payload to get user ID (gateway already verified the token)
-  let userId: string
   try {
-    const payloadBase64 = token.split('.')[1]
-    const payload = JSON.parse(atob(payloadBase64))
-    userId = payload.sub
-    if (!userId) throw new Error('No subject in token')
-  } catch {
-    return jsonResponse({ error: 'Invalid token.' }, 401)
-  }
-
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
-
-  const adminClient = createClient(supabaseUrl, serviceRoleKey)
-
-  const body = await request.json().catch(() => null)
-  const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
-  const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
-
-  if (!prompt || !projectId) {
-    return jsonResponse({ error: 'Missing required fields: prompt and projectId.' }, 400)
-  }
-
-  let floorPlan: FloorPlanJson
-
-  try {
-    floorPlan = await generateFloorPlan(openAiApiKey, prompt)
-  } catch (firstError) {
-    try {
-      const retryPrompt = `${prompt}\n\nPrevious output was invalid. Error: ${
-        firstError instanceof Error ? firstError.message : 'Unknown parse error'
-      }\nReturn valid raw JSON only.`
-      floorPlan = await generateFloorPlan(openAiApiKey, retryPrompt)
-    } catch (retryError) {
-      return jsonResponse(
-        {
-          error: retryError instanceof Error ? retryError.message : 'Unable to generate floor plan JSON.',
-        },
-        502,
-      )
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader?.startsWith('Bearer ')) {
+      return jsonResponse({ error: 'Unauthorized.' }, 401)
     }
+
+    const token = authHeader.replace('Bearer ', '').trim()
+
+    let userId: string
+    try {
+      const parts = token.split('.')
+      if (parts.length !== 3) throw new Error('Malformed JWT')
+
+      // Fix URL-safe base64 to standard base64
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+      const payload = JSON.parse(atob(padded))
+
+      userId = payload.sub
+      if (!userId) throw new Error('No subject in token')
+    } catch (e) {
+      console.error('JWT decode error:', e)
+      return jsonResponse({ error: 'Invalid token.' }, 401)
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
+
+    const adminClient = createClient(supabaseUrl, serviceRoleKey)
+
+    const body = await request.json().catch(() => null)
+    const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
+    const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
+
+    if (!prompt || !projectId) {
+      return jsonResponse({ error: 'Missing required fields: prompt and projectId.' }, 400)
+    }
+
+    let floorPlan: FloorPlanJson
+
+    try {
+      floorPlan = await generateFloorPlan(openAiApiKey, prompt)
+    } catch (firstError) {
+      try {
+        const retryPrompt = `${prompt}\n\nPrevious output was invalid. Error: ${
+          firstError instanceof Error ? firstError.message : 'Unknown parse error'
+        }\nReturn valid raw JSON only.`
+        floorPlan = await generateFloorPlan(openAiApiKey, retryPrompt)
+      } catch (retryError) {
+        return jsonResponse(
+          {
+            error: retryError instanceof Error ? retryError.message : 'Unable to generate floor plan JSON.',
+          },
+          502,
+        )
+      }
+    }
+
+    const { error: updateError } = await adminClient
+      .from('projects')
+      .update({ floor_plan_json: floorPlan, status: 'floor_plan' })
+      .eq('id', projectId)
+      .eq('user_id', userId)
+
+    if (updateError) {
+      return jsonResponse({ error: updateError.message }, 500)
+    }
+
+    return jsonResponse(floorPlan)
+  } catch (e) {
+    console.error('Unhandled error:', e)
+    return jsonResponse({ error: 'Internal server error' }, 500)
   }
-
-  const { error: updateError } = await adminClient
-    .from('projects')
-    .update({ floor_plan_json: floorPlan, status: 'floor_plan' })
-    .eq('id', projectId)
-    .eq('user_id', userId)
-
-  if (updateError) {
-    return jsonResponse({ error: updateError.message }, 500)
-  }
-
-  return jsonResponse(floorPlan)
 })
