@@ -109,11 +109,10 @@ serve(async (request) => {
   }
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
 
-  if (!supabaseUrl || !anonKey || !serviceRoleKey || !openAiApiKey) {
+  if (!supabaseUrl || !serviceRoleKey || !openAiApiKey) {
     return jsonResponse({ error: 'Missing required environment variables.' }, 500)
   }
 
@@ -122,19 +121,20 @@ serve(async (request) => {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
 
-  const userClient = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: authHeader } },
-  })
+  const token = authHeader.replace('Bearer ', '').trim()
+  if (!token) {
+    return jsonResponse({ error: 'Unauthorized.' }, 401)
+  }
+
+  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey)
   const {
     data: { user },
     error: authError,
-  } = await userClient.auth.getUser()
+  } = await supabaseAdmin.auth.getUser(token)
 
   if (authError || !user) {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
-
-  const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
   const body = await request.json().catch(() => null)
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
@@ -164,7 +164,7 @@ serve(async (request) => {
     }
   }
 
-  const { error: updateError } = await adminClient
+  const { error: updateError } = await supabaseAdmin
     .from('projects')
     .update({ floor_plan_json: floorPlan, status: 'floor_plan' })
     .eq('id', projectId)
