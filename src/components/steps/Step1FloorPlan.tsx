@@ -59,36 +59,31 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
 
       if (!session) throw new Error('Not authenticated')
 
-      // Generate the floor plan image with Gemini 2.0 Flash
+      // Generate the floor plan image with Imagen 2
       const genAI = new GoogleGenerativeAI(GEMINI_API_KEY)
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+      const model = genAI.getGenerativeModel({ model: 'imagen-3.0-generate-002' })
 
-      const result = await model.generateContent({
-        contents: [{
-          role: 'user',
-          parts: [{
-            text: `Generate a clean 2D architectural floor plan for: "${promptValue.trim()}". Top-down view, black lines on white background, labeled rooms, thick lines for walls, door arcs, window markers, room dimensions. Architectural blueprint style.`
-          }]
-        }],
-        generationConfig: {
-          responseModalities: ['IMAGE', 'TEXT'],
-        } as any,
+      const architecturalPrompt = `A clean professional 2D architectural floor plan for: "${promptValue.trim()}". Top-down view, black lines on white background, labeled rooms, thick lines for walls, door arcs, window markers, include room dimensions. Architectural blueprint style.`
+
+      const result = await (model as any).generateImages({
+        prompt: architecturalPrompt,
+        numberOfImages: 1,
+        aspectRatio: '1:1',
       })
 
-      const imageData = result.response.candidates?.[0]?.content?.parts
-        ?.find((part: any) => part.inlineData)?.inlineData
-
-      if (!imageData) {
-        throw new Error('Gemini API returned no image. Please try again.')
+      if (!result.images || result.images.length === 0) {
+        throw new Error('Imagen API returned no images. Please try again.')
       }
 
+      const imageBase64: string = result.images[0].imageBytes
+
       // Convert base64 to blob for upload
-      const byteCharacters = atob(imageData.data)
+      const byteCharacters = atob(imageBase64)
       const byteNumbers = new Uint8Array(byteCharacters.length)
       for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i)
       }
-      const blob = new Blob([byteNumbers], { type: imageData.mimeType || 'image/png' })
+      const blob = new Blob([byteNumbers], { type: 'image/png' })
 
       // Upload to Supabase Storage
       const userId = session.user.id
@@ -123,7 +118,7 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
     } catch (generationError) {
       const message = generationError instanceof Error ? generationError.message : 'Generation failed, please try again.'
       if (message.includes('API_KEY') || message.includes('api key') || message.includes('invalid key')) {
-        setError('Gemini API error: invalid key. Check your VITE_GOOGLE_GEMINI_API_KEY.')
+        setError('Imagen API error: invalid key. Check your VITE_GOOGLE_GEMINI_API_KEY.')
       } else {
         setError(message)
       }
