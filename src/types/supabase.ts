@@ -10,7 +10,6 @@ export type Project = {
   status: ProjectStatus
   style: string | null
   floor_plan_json: Record<string, unknown> | null
-  floor_plan_url: string | null
   created_at: string
   updated_at: string
 }

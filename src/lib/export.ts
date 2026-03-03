@@ -1,5 +1,8 @@
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import { createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { FloorPlanCanvas } from "../components/FloorPlanCanvas";
 import type { Project, RoomRender } from "../types/supabase";
 
 function safeFileName(title: string) {
@@ -27,11 +30,32 @@ async function elementToPngDataUrl(element: HTMLElement) {
 }
 
 async function captureFloorPlan(project: Project): Promise<string | null> {
-  if (!project.floor_plan_url) {
+  if (!project.floor_plan_json) {
     return null;
   }
 
-  return captureRenderImage(project.floor_plan_url);
+  const container = document.createElement("div");
+  container.style.position = "fixed";
+  container.style.left = "-10000px";
+  container.style.top = "0";
+  container.style.width = "900px";
+  container.style.padding = "20px";
+  container.style.background = "#111111";
+  document.body.appendChild(container);
+
+  const root = createRoot(container);
+  root.render(
+    createElement(FloorPlanCanvas, {
+      floorPlanJson: project.floor_plan_json as never,
+    }),
+  );
+  await new Promise((resolve) => window.setTimeout(resolve, 80));
+
+  const pngData = await elementToPngDataUrl(container);
+  root.unmount();
+  container.remove();
+
+  return pngData;
 }
 
 async function captureRenderImage(imageUrl: string): Promise<string | null> {

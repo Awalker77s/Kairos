@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { FloorPlanCanvas } from "../components/FloorPlanCanvas";
 import { getProject } from "../lib/projects";
 import { getRendersByProject } from "../lib/renders";
 import type { Project, RoomRender } from "../types/supabase";
@@ -85,19 +86,7 @@ export function SharePage() {
         <h2 className="mb-4 font-serif text-xl font-semibold text-warm-black">
           2D Floor Plan
         </h2>
-        {project.floor_plan_url ? (
-          <div className="w-full max-w-[800px] overflow-hidden rounded-xl border border-warm-border bg-warm-white">
-            <img
-              src={project.floor_plan_url}
-              alt="Generated 2D floor plan"
-              className="h-auto w-full"
-            />
-          </div>
-        ) : (
-          <p className="text-sm text-warm-stone">
-            No floor plan generated for this project yet.
-          </p>
-        )}
+        <FloorPlanCanvas floorPlanJson={project.floor_plan_json as never} />
       </section>
 
       <section className="mt-8 rounded-2xl border border-warm-border bg-warm-white p-6 shadow-sm">
