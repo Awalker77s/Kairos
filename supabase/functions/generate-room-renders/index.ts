@@ -115,23 +115,29 @@ serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
-
-  if (!supabaseUrl || !serviceRoleKey || !openAiApiKey) {
-    return jsonResponse({ error: 'Missing required environment variables.' }, 500)
-  }
-
   const authHeader = request.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
 
   const token = authHeader.replace('Bearer ', '').trim()
-  if (!token) {
-    return jsonResponse({ error: 'Unauthorized.' }, 401)
+
+  // Decode JWT payload to get user ID (gateway already verified the token)
+  let userId: string
+  try {
+    const payloadBase64 = token.split('.')[1]
+    const payload = JSON.parse(atob(payloadBase64))
+    userId = payload.sub
+    if (!userId) throw new Error('No subject in token')
+  } catch {
+    return jsonResponse({ error: 'Invalid token.' }, 401)
   }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
+
+  const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
   const body = await request.json().catch(() => null)
   const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
@@ -141,21 +147,11 @@ serve(async (request) => {
     return jsonResponse({ error: 'Missing required fields: projectId and style.' }, 400)
   }
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey)
-  const {
-    data: { user },
-    error: authError,
-  } = await supabaseAdmin.auth.getUser(token)
-
-  if (authError || !user) {
-    return jsonResponse({ error: 'Unauthorized.' }, 401)
-  }
-
-  const { data: project, error: projectError } = await supabaseAdmin
+  const { data: project, error: projectError } = await adminClient
     .from('projects')
     .select('id, user_id, floor_plan_json')
     .eq('id', projectId)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
     .single()
 
   if (projectError || !project) {
@@ -181,9 +177,9 @@ serve(async (request) => {
       }
 
       const imageBuffer = await imageResponse.arrayBuffer()
-      const storagePath = `${user.id}/${projectId}/${room.id}.png`
+      const storagePath = `${userId}/${projectId}/${room.id}.png`
 
-      const { error: uploadError } = await supabaseAdmin.storage.from('room-renders').upload(storagePath, imageBuffer, {
+      const { error: uploadError } = await adminClient.storage.from('room-renders').upload(storagePath, imageBuffer, {
         contentType: 'image/png',
         upsert: true,
       })
@@ -192,7 +188,7 @@ serve(async (request) => {
         throw new Error(uploadError.message)
       }
 
-      const { data: publicUrlData } = supabaseAdmin.storage.from('room-renders').getPublicUrl(storagePath)
+      const { data: publicUrlData } = adminClient.storage.from('room-renders').getPublicUrl(storagePath)
 
       const renderPayload = {
         project_id: projectId,
@@ -203,7 +199,7 @@ serve(async (request) => {
         status: 'complete',
       }
 
-      const { data: existingRender } = await supabaseAdmin
+      const { data: existingRender } = await adminClient
         .from('room_renders')
         .select('id')
         .eq('project_id', projectId)
@@ -213,7 +209,7 @@ serve(async (request) => {
       let renderRecord: RoomRender | null = null
 
       if (existingRender?.id) {
-        const { data: updatedRender, error: updateError } = await supabaseAdmin
+        const { data: updatedRender, error: updateError } = await adminClient
           .from('room_renders')
           .update(renderPayload)
           .eq('id', existingRender.id)
@@ -226,7 +222,7 @@ serve(async (request) => {
 
         renderRecord = updatedRender as RoomRender
       } else {
-        const { data: insertedRender, error: insertError } = await supabaseAdmin
+        const { data: insertedRender, error: insertError } = await adminClient
           .from('room_renders')
           .insert(renderPayload)
           .select('*')
@@ -245,7 +241,7 @@ serve(async (request) => {
     } catch (roomError) {
       const message = roomError instanceof Error ? roomError.message : 'Unexpected render generation failure.'
 
-      await supabaseAdmin.from('room_renders').upsert(
+      await adminClient.from('room_renders').upsert(
         {
           project_id: projectId,
           room_name: room.name,
@@ -263,11 +259,11 @@ serve(async (request) => {
     }
   }
 
-  const { error: projectUpdateError } = await supabaseAdmin
+  const { error: projectUpdateError } = await adminClient
     .from('projects')
     .update({ status: 'rendered' })
     .eq('id', projectId)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
 
   if (projectUpdateError) {
     return jsonResponse({ error: projectUpdateError.message }, 500)

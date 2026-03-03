@@ -108,33 +108,29 @@ serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed.' }, 405)
   }
 
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')
-
-  if (!supabaseUrl || !serviceRoleKey || !openAiApiKey) {
-    return jsonResponse({ error: 'Missing required environment variables.' }, 500)
-  }
-
   const authHeader = request.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Unauthorized.' }, 401)
   }
 
   const token = authHeader.replace('Bearer ', '').trim()
-  if (!token) {
-    return jsonResponse({ error: 'Unauthorized.' }, 401)
+
+  // Decode JWT payload to get user ID (gateway already verified the token)
+  let userId: string
+  try {
+    const payloadBase64 = token.split('.')[1]
+    const payload = JSON.parse(atob(payloadBase64))
+    userId = payload.sub
+    if (!userId) throw new Error('No subject in token')
+  } catch {
+    return jsonResponse({ error: 'Invalid token.' }, 401)
   }
 
-  const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey)
-  const {
-    data: { user },
-    error: authError,
-  } = await supabaseAdmin.auth.getUser(token)
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
 
-  if (authError || !user) {
-    return jsonResponse({ error: 'Unauthorized.' }, 401)
-  }
+  const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
   const body = await request.json().catch(() => null)
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
@@ -164,11 +160,11 @@ serve(async (request) => {
     }
   }
 
-  const { error: updateError } = await supabaseAdmin
+  const { error: updateError } = await adminClient
     .from('projects')
     .update({ floor_plan_json: floorPlan, status: 'floor_plan' })
     .eq('id', projectId)
-    .eq('user_id', user.id)
+    .eq('user_id', userId)
 
   if (updateError) {
     return jsonResponse({ error: updateError.message }, 500)
