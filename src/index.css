@@ -17,3 +17,45 @@
     font-family: 'Playfair Display', Georgia, serif;
   }
 }
+
+/* ── Scroll-triggered section animations ─────────────────────────── */
+
+.animate-section-child {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+}
+
+[data-visible="true"] > .animate-section-child,
+.animate-section-child[data-visible="true"] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Hero CTA glow pulse ─────────────────────────────────────────── */
+
+.hero-glow {
+  opacity: 0.1;
+  filter: blur(18px);
+  animation: glowPulse 3s ease-in-out infinite;
+}
+
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.1; }
+  50%      { opacity: 0.2; }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-section-child {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .hero-glow {
+    animation: none;
+    opacity: 0.12;
+  }
+}
