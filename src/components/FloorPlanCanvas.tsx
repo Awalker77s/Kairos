@@ -19,8 +19,18 @@ type FloorPlanOpening = {
 
 type FloorPlanJson = {
   rooms: FloorPlanRoom[]
+  walls?: FloorPlanWall[]
   doors?: FloorPlanOpening[]
   windows?: FloorPlanOpening[]
+}
+
+type FloorPlanWall = {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  thickness?: number
 }
 
 type FloorPlanCanvasProps = {
@@ -31,11 +41,18 @@ const MAX_WIDTH = 800
 const MAX_HEIGHT = 600
 const PADDING = 24
 
-function getBounds(rooms: FloorPlanRoom[]) {
-  const minX = Math.min(...rooms.map((room) => room.x))
-  const minY = Math.min(...rooms.map((room) => room.y))
-  const maxX = Math.max(...rooms.map((room) => room.x + room.width))
-  const maxY = Math.max(...rooms.map((room) => room.y + room.height))
+function getBounds(rooms: FloorPlanRoom[], walls: FloorPlanWall[]) {
+  const wallX = walls.flatMap((wall) => [wall.x1, wall.x2])
+  const wallY = walls.flatMap((wall) => [wall.y1, wall.y2])
+  const roomMinX = rooms.map((room) => room.x)
+  const roomMinY = rooms.map((room) => room.y)
+  const roomMaxX = rooms.map((room) => room.x + room.width)
+  const roomMaxY = rooms.map((room) => room.y + room.height)
+
+  const minX = Math.min(...roomMinX, ...wallX)
+  const minY = Math.min(...roomMinY, ...wallY)
+  const maxX = Math.max(...roomMaxX, ...wallX)
+  const maxY = Math.max(...roomMaxY, ...wallY)
 
   return {
     minX,
@@ -72,8 +89,9 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   }
 
   const rooms = Array.isArray(floorPlanJson.rooms) ? floorPlanJson.rooms : []
+  const walls = Array.isArray(floorPlanJson.walls) ? floorPlanJson.walls : []
 
-  if (!rooms.length) {
+  if (!rooms.length && !walls.length) {
     return (
       <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
         Floor plan data is missing room geometry.
@@ -84,7 +102,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   const doors = Array.isArray(floorPlanJson.doors) ? floorPlanJson.doors : []
   const windows = Array.isArray(floorPlanJson.windows) ? floorPlanJson.windows : []
 
-  const bounds = getBounds(rooms)
+  const bounds = getBounds(rooms, walls)
   const scale = Math.min((MAX_WIDTH - PADDING * 2) / bounds.width, (MAX_HEIGHT - PADDING * 2) / bounds.height)
 
   const viewWidth = bounds.width + PADDING * 2
@@ -189,6 +207,41 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
               </text>
             </g>
           ))}
+
+          {walls.map((wall) => (
+            <line
+              key={wall.id}
+              x1={wall.x1}
+              y1={wall.y1}
+              x2={wall.x2}
+              y2={wall.y2}
+              stroke="#1C1410"
+              strokeWidth={Math.max(0.2, wall.thickness ?? 0.2)}
+              strokeLinecap="round"
+            />
+          ))}
+
+          {walls.length > 1 && (() => {
+            const first = walls[0]
+            const last = walls[walls.length - 1]
+            const isClosed = first.x1 === last.x2 && first.y1 === last.y2
+
+            if (isClosed) {
+              return null
+            }
+
+            return (
+              <line
+                x1={last.x2}
+                y1={last.y2}
+                x2={first.x1}
+                y2={first.y1}
+                stroke="#1C1410"
+                strokeWidth={Math.max(0.2, last.thickness ?? 0.2)}
+                strokeDasharray="0.5 0.3"
+              />
+            )
+          })()}
 
           {doors.map((door) => {
             const room = rooms.find((item) => item.id === door.roomId)
