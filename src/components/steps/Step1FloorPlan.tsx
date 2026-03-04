@@ -49,8 +49,6 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
 
       if (!session) throw new Error('Not authenticated')
 
-      console.log('session.access_token', session.access_token)
-
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`, {
         method: 'POST',
         headers: {
@@ -68,6 +66,7 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
       }
 
       const result = (await response.json()) as FloorPlanResponse
+      console.log('generate-floor-plan raw response', result)
 
       if (!Array.isArray(result.rooms)) {
         throw new Error('Missing floor plan payload from generator.')

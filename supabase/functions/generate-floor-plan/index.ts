@@ -86,6 +86,7 @@ async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<
   }
 
   const payload = await openAiResponse.json()
+  console.log('generate-floor-plan OpenAI raw payload:', JSON.stringify(payload))
   const content = payload?.choices?.[0]?.message?.content
 
   if (typeof content !== 'string') {
