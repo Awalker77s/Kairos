@@ -37,6 +37,126 @@ type FloorPlanCanvasProps = {
   floorPlanJson: FloorPlanJson | null
 }
 
+function asNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return parsed
+    }
+  }
+
+  return null
+}
+
+function normalizeRooms(rooms: unknown): FloorPlanRoom[] {
+  if (!Array.isArray(rooms)) {
+    return []
+  }
+
+  return rooms
+    .map((room, index) => {
+      if (!room || typeof room !== 'object') {
+        return null
+      }
+
+      const item = room as Record<string, unknown>
+      const x = asNumber(item.x)
+      const y = asNumber(item.y)
+      const width = asNumber(item.width)
+      const height = asNumber(item.height)
+
+      if (x === null || y === null || width === null || height === null) {
+        return null
+      }
+
+      return {
+        id: String(item.id ?? `room-${index}`),
+        name: String(item.name ?? `Room ${index + 1}`),
+        x,
+        y,
+        width,
+        height,
+      }
+    })
+    .filter((room): room is FloorPlanRoom => room !== null)
+}
+
+function normalizeWalls(walls: unknown): FloorPlanWall[] {
+  if (!Array.isArray(walls)) {
+    return []
+  }
+
+  const normalized: FloorPlanWall[] = []
+
+  walls.forEach((wall, index) => {
+    if (!wall || typeof wall !== 'object') {
+      return
+    }
+
+    const item = wall as Record<string, unknown>
+    const start = (item.start ?? item.from) as Record<string, unknown> | undefined
+    const end = (item.end ?? item.to) as Record<string, unknown> | undefined
+
+    const x1 = asNumber(item.x1) ?? asNumber(start?.x)
+    const y1 = asNumber(item.y1) ?? asNumber(start?.y)
+    const x2 = asNumber(item.x2) ?? asNumber(end?.x)
+    const y2 = asNumber(item.y2) ?? asNumber(end?.y)
+
+    if (x1 === null || y1 === null || x2 === null || y2 === null) {
+      return
+    }
+
+    normalized.push({
+      id: String(item.id ?? `wall-${index}`),
+      x1,
+      y1,
+      x2,
+      y2,
+      thickness: asNumber(item.thickness) ?? undefined,
+    })
+  })
+
+  return normalized
+}
+
+function normalizeOpenings(openings: unknown): FloorPlanOpening[] {
+  if (!Array.isArray(openings)) {
+    return []
+  }
+
+  return openings
+    .map((opening, index) => {
+      if (!opening || typeof opening !== 'object') {
+        return null
+      }
+
+      const item = opening as Record<string, unknown>
+      const wall = item.wall
+      if (wall !== 'top' && wall !== 'bottom' && wall !== 'left' && wall !== 'right') {
+        return null
+      }
+
+      const position = asNumber(item.position)
+      const width = asNumber(item.width)
+      if (position === null || width === null) {
+        return null
+      }
+
+      return {
+        id: String(item.id ?? `opening-${index}`),
+        roomId: String(item.roomId ?? item.room_id ?? ''),
+        wall,
+        position,
+        width,
+      }
+    })
+    .filter((opening): opening is FloorPlanOpening => opening !== null)
+}
+
 const MAX_WIDTH = 800
 const MAX_HEIGHT = 600
 const PADDING = 24
@@ -88,8 +208,8 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
     return null
   }
 
-  const rooms = Array.isArray(floorPlanJson.rooms) ? floorPlanJson.rooms : []
-  const walls = Array.isArray(floorPlanJson.walls) ? floorPlanJson.walls : []
+  const rooms = normalizeRooms(floorPlanJson.rooms)
+  const walls = normalizeWalls(floorPlanJson.walls)
 
   if (!rooms.length && !walls.length) {
     return (
@@ -99,8 +219,8 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
     )
   }
 
-  const doors = Array.isArray(floorPlanJson.doors) ? floorPlanJson.doors : []
-  const windows = Array.isArray(floorPlanJson.windows) ? floorPlanJson.windows : []
+  const doors = normalizeOpenings(floorPlanJson.doors)
+  const windows = normalizeOpenings(floorPlanJson.windows)
 
   const bounds = getBounds(rooms, walls)
   const scale = Math.min((MAX_WIDTH - PADDING * 2) / bounds.width, (MAX_HEIGHT - PADDING * 2) / bounds.height)
