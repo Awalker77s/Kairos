@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 type FloorPlanRoom = {
   id: string
   name: string
@@ -63,6 +65,8 @@ function openingPoint(room: FloorPlanRoom, opening: FloorPlanOpening) {
 }
 
 export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
+  const [zoomLevel, setZoomLevel] = useState(1)
+
   if (!floorPlanJson) {
     return null
   }
@@ -86,15 +90,62 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   const viewWidth = bounds.width + PADDING * 2
   const viewHeight = bounds.height + PADDING * 2
 
+  function zoomIn() {
+    setZoomLevel((current) => Math.min(current + 0.25, 3))
+  }
+
+  function zoomOut() {
+    setZoomLevel((current) => Math.max(current - 0.25, 0.5))
+  }
+
+  function resetZoom() {
+    setZoomLevel(1)
+  }
+
   return (
-    <div className="w-full max-w-[800px] overflow-hidden rounded-xl border border-warm-border bg-warm-white">
-      <svg
-        className="h-auto w-full"
-        viewBox={`0 0 ${viewWidth} ${viewHeight}`}
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-        aria-label="Generated 2D floor plan"
-      >
+    <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-warm-white">
+      <div className="flex items-center justify-between border-b border-warm-border bg-cream px-3 py-2">
+        <p className="text-xs font-medium text-warm-stone">Zoom: {Math.round(zoomLevel * 100)}%</p>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={zoomOut}
+            className="rounded-md border border-warm-border bg-warm-white px-2 py-1 text-sm text-warm-black transition hover:border-gold"
+          >
+            −
+          </button>
+          <button
+            type="button"
+            onClick={zoomIn}
+            className="rounded-md border border-warm-border bg-warm-white px-2 py-1 text-sm text-warm-black transition hover:border-gold"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            onClick={resetZoom}
+            className="rounded-md border border-warm-border bg-warm-white px-2 py-1 text-xs text-warm-black transition hover:border-gold"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <div className="flex max-h-[70vh] min-h-[240px] w-full items-center justify-center overflow-hidden bg-cream p-3">
+        <svg
+          className="block max-h-[70vh] max-w-full"
+          style={{
+            width: 'auto',
+            height: 'auto',
+            objectFit: 'contain',
+            transform: `scale(${zoomLevel})`,
+            transformOrigin: 'center center',
+          }}
+          viewBox={`0 0 ${viewWidth} ${viewHeight}`}
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label="Generated 2D floor plan"
+        >
         <defs>
           <pattern id="grid" width="4" height="4" patternUnits="userSpaceOnUse">
             <path d="M 4 0 L 0 0 0 4" fill="none" stroke="rgba(28,20,16,0.06)" strokeWidth="0.08" />
@@ -190,7 +241,8 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
             )
           })}
         </g>
-      </svg>
+        </svg>
+      </div>
     </div>
   )
 }
