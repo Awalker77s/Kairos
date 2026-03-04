@@ -19,6 +19,7 @@ type NormalizedRoom = {
   y: number
   width: number
   height: number
+  floor: number
 }
 
 type NormalizedWall = {
@@ -90,6 +91,7 @@ function normalizeRooms(rooms: unknown): NormalizedRoom[] {
         y,
         width,
         height,
+        floor: asNumber(item.floor) ?? 1,
       }
     })
     .filter((room): room is NormalizedRoom => room !== null)
@@ -240,15 +242,51 @@ function classifyWalls(walls: NormalizedWall[], rooms: NormalizedRoom[]): Normal
 /* ------------------------------------------------------------------ */
 
 function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPlanResponse; projectTitle: string }) {
-  const rooms = normalizeRooms(floorPlanJson.rooms)
-  const rawWalls = normalizeWalls(floorPlanJson.walls)
+  const [selectedFloor, setSelectedFloor] = useState(1)
+
+  const allRooms = normalizeRooms(floorPlanJson.rooms)
+  const allRawWalls = normalizeWalls(floorPlanJson.walls)
+  const allDoors = normalizeOpenings(floorPlanJson.doors, 'door')
+  const allWindows = normalizeOpenings(floorPlanJson.windows, 'window')
+
+  // Determine available floors
+  const floors = useMemo(() => {
+    const floorSet = new Set(allRooms.map((r) => r.floor))
+    return Array.from(floorSet).sort((a, b) => a - b)
+  }, [allRooms])
+
+  // Filter rooms by selected floor
+  const rooms = useMemo(() => allRooms.filter((r) => r.floor === selectedFloor), [allRooms, selectedFloor])
+  const roomIds = useMemo(() => new Set(rooms.map((r) => r.id)), [rooms])
+
+  // Filter walls: keep walls that touch rooms on the selected floor
+  const rawWalls = useMemo(() => {
+    if (floors.length <= 1) return allRawWalls
+    // Keep walls whose endpoints are within the bounding box of the selected floor's rooms
+    const floorBounds = floorPlanBounds(rooms, [])
+    const tolerance = Math.max(floorBounds.width, floorBounds.height) * 0.05
+    return allRawWalls.filter((wall) => {
+      const inX = (x: number) => x >= floorBounds.minX - tolerance && x <= floorBounds.minX + floorBounds.width + tolerance
+      const inY = (y: number) => y >= floorBounds.minY - tolerance && y <= floorBounds.minY + floorBounds.height + tolerance
+      return inX(wall.x1) && inY(wall.y1) && inX(wall.x2) && inY(wall.y2)
+    })
+  }, [allRawWalls, rooms, floors.length])
+
+  // Filter doors/windows by rooms on selected floor
+  const doors = useMemo(
+    () => allDoors.filter((d) => !d.roomId || roomIds.has(d.roomId)),
+    [allDoors, roomIds],
+  )
+  const windows = useMemo(
+    () => allWindows.filter((w) => !w.roomId || roomIds.has(w.roomId)),
+    [allWindows, roomIds],
+  )
+
   const walls = useMemo(() => classifyWalls(rawWalls, rooms), [rawWalls, rooms])
-  const doors = normalizeOpenings(floorPlanJson.doors, 'door')
-  const windows = normalizeOpenings(floorPlanJson.windows, 'window')
 
   const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
 
-  if (!rooms.length && !walls.length) {
+  if (!allRooms.length && !allRawWalls.length) {
     return (
       <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
         Floor plan data is missing room and wall geometry.
@@ -269,7 +307,6 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
   const doorStroke = base * 0.003
   const windowStroke = base * 0.0025
   const labelSize = base * 0.025
-  const sqftSize = labelSize * 0.75
   const gridStep = Math.max(1, Math.round(base / 20))
   const shadowOffset = base * 0.004
 
@@ -297,7 +334,27 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 
   return (
-    <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-white p-3 shadow-sm">
+    <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-white shadow-sm">
+      {/* Floor selector */}
+      {floors.length > 1 && (
+        <div className="flex items-center gap-2 border-b border-warm-border bg-cream px-4 py-2">
+          {floors.map((floor) => (
+            <button
+              key={floor}
+              type="button"
+              onClick={() => setSelectedFloor(floor)}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                selectedFloor === floor
+                  ? 'bg-warm-black text-white'
+                  : 'bg-white text-warm-black border border-warm-border hover:border-warm-black'
+              }`}
+            >
+              Floor {floor}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="p-3">
       <svg
         className="h-auto w-full"
         viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`}
@@ -471,24 +528,30 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
         {/* Room labels */}
         {rooms.map((room) => {
           const sqft = Math.round(room.width * room.height)
+          const nameText = room.name.toUpperCase()
+          // Scale font to fit within room: use ~60% of room width / char count, capped by room height and global label size
+          const maxByWidth = (room.width * 0.85) / Math.max(nameText.length * 0.6, 1)
+          const maxByHeight = room.height * 0.22
+          const fitLabelSize = Math.min(labelSize, maxByWidth, maxByHeight)
+          const fitSqftSize = fitLabelSize * 0.75
           return (
             <g key={`label-${room.id}`}>
               <text
                 x={room.x + room.width / 2}
-                y={room.y + room.height / 2 - sqftSize * 0.4}
-                fontSize={labelSize}
+                y={room.y + room.height / 2 - fitSqftSize * 0.4}
+                fontSize={fitLabelSize}
                 fontWeight="600"
                 fill="#333333"
                 textAnchor="middle"
                 dominantBaseline="middle"
                 letterSpacing={base * 0.002}
               >
-                {room.name.toUpperCase()}
+                {nameText}
               </text>
               <text
                 x={room.x + room.width / 2}
-                y={room.y + room.height / 2 + labelSize * 0.9}
-                fontSize={sqftSize}
+                y={room.y + room.height / 2 + fitLabelSize * 0.9}
+                fontSize={fitSqftSize}
                 fontWeight="300"
                 fill="#888888"
                 textAnchor="middle"
@@ -555,7 +618,7 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
             textAnchor="middle"
             dominantBaseline="middle"
           >
-            {projectTitle || 'FLOOR PLAN'}
+            {projectTitle || 'FLOOR PLAN'}{floors.length > 1 ? ` — Floor ${selectedFloor}` : ''}
           </text>
           <text
             x={titleBlockX + titleBlockW * 0.3}
@@ -581,6 +644,7 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
           </text>
         </g>
       </svg>
+      </div>
     </div>
   )
 }

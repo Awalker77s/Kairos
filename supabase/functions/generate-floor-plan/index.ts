@@ -14,6 +14,7 @@ type FloorPlanRoom = {
   y: number
   width: number
   height: number
+  floor: number
 }
 
 type FloorPlanJson = {
@@ -45,6 +46,14 @@ DESIGN PRINCIPLES — think like a real architect:
 - Rooms MUST share walls and be flush against each other with no gaps. Adjacent rooms share the exact same wall coordinates.
 - The overall footprint should be a cohesive, compact rectangular or L-shaped form — not scattered separate boxes.
 
+MULTI-STORY RULES:
+- Every room MUST have a "floor" field: 1 for the first floor, 2 for the second floor.
+- If the home description mentions multiple stories, a second floor, or upstairs bedrooms, split rooms across floors appropriately.
+- Typical layout: common areas (kitchen, living, dining, garage, foyer) on floor 1; bedrooms, bathrooms, and private spaces on floor 2.
+- For single-story homes, set "floor": 1 on every room.
+- Each floor should have its own independent coordinate grid starting near (0,0) — do not stack floors vertically in the same coordinate space.
+- Walls, doors, and windows that belong to a room inherit that room's floor.
+
 WALL RULES:
 - Generate explicit walls for every room edge. Walls are line segments (x1,y1) to (x2,y2).
 - Mark each wall as "exterior": true if it is on the outer perimeter of the house, or "exterior": false for interior walls between rooms.
@@ -60,7 +69,7 @@ DOOR AND WINDOW RULES:
 JSON SCHEMA:
 {
   "rooms": [
-    { "id": "string", "name": "string", "type": "bedroom|bathroom|kitchen|living|dining|office|garage|hallway|closet|laundry|foyer|other", "x": number, "y": number, "width": number, "height": number }
+    { "id": "string", "name": "string", "type": "bedroom|bathroom|kitchen|living|dining|office|garage|hallway|closet|laundry|foyer|other", "x": number, "y": number, "width": number, "height": number, "floor": number }
   ],
   "walls": [
     { "id": "string", "x1": number, "y1": number, "x2": number, "y2": number, "exterior": boolean }

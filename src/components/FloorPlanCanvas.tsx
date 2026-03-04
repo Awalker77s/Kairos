@@ -7,6 +7,7 @@ type FloorPlanRoom = {
   y: number
   width: number
   height: number
+  floor: number
 }
 
 type FloorPlanOpening = {
@@ -80,6 +81,7 @@ function normalizeRooms(rooms: unknown): FloorPlanRoom[] {
         y,
         width,
         height,
+        floor: asNumber(item.floor) ?? 1,
       }
     })
     .filter((room): room is FloorPlanRoom => room !== null)
@@ -203,15 +205,16 @@ function openingPoint(room: FloorPlanRoom, opening: FloorPlanOpening) {
 
 export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   const [zoomLevel, setZoomLevel] = useState(1)
+  const [selectedFloor, setSelectedFloor] = useState(1)
 
   if (!floorPlanJson) {
     return null
   }
 
-  const rooms = normalizeRooms(floorPlanJson.rooms)
-  const walls = normalizeWalls(floorPlanJson.walls)
+  const allRooms = normalizeRooms(floorPlanJson.rooms)
+  const allWalls = normalizeWalls(floorPlanJson.walls)
 
-  if (!rooms.length && !walls.length) {
+  if (!allRooms.length && !allWalls.length) {
     return (
       <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
         Floor plan data is missing room geometry.
@@ -219,8 +222,29 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
     )
   }
 
-  const doors = normalizeOpenings(floorPlanJson.doors)
-  const windows = normalizeOpenings(floorPlanJson.windows)
+  const allDoors = normalizeOpenings(floorPlanJson.doors)
+  const allWindows = normalizeOpenings(floorPlanJson.windows)
+
+  // Determine available floors
+  const floors = Array.from(new Set(allRooms.map((r) => r.floor))).sort((a, b) => a - b)
+
+  // Filter by selected floor
+  const rooms = allRooms.filter((r) => r.floor === selectedFloor)
+  const roomIds = new Set(rooms.map((r) => r.id))
+
+  const walls = (() => {
+    if (floors.length <= 1) return allWalls
+    const fb = getBounds(rooms, [])
+    const tol = Math.max(fb.width, fb.height) * 0.05
+    return allWalls.filter((w) => {
+      const inX = (x: number) => x >= fb.minX - tol && x <= fb.minX + fb.width + tol
+      const inY = (y: number) => y >= fb.minY - tol && y <= fb.minY + fb.height + tol
+      return inX(w.x1) && inY(w.y1) && inX(w.x2) && inY(w.y2)
+    })
+  })()
+
+  const doors = allDoors.filter((d) => !d.roomId || roomIds.has(d.roomId))
+  const windows = allWindows.filter((w) => !w.roomId || roomIds.has(w.roomId))
 
   const bounds = getBounds(rooms, walls)
   const scale = Math.min((MAX_WIDTH - PADDING * 2) / bounds.width, (MAX_HEIGHT - PADDING * 2) / bounds.height)
@@ -243,7 +267,27 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   return (
     <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-warm-white">
       <div className="flex items-center justify-between border-b border-warm-border bg-cream px-3 py-2">
-        <p className="text-xs font-medium text-warm-stone">Zoom: {Math.round(zoomLevel * 100)}%</p>
+        <div className="flex items-center gap-3">
+          {floors.length > 1 && (
+            <div className="flex items-center gap-1">
+              {floors.map((floor) => (
+                <button
+                  key={floor}
+                  type="button"
+                  onClick={() => setSelectedFloor(floor)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                    selectedFloor === floor
+                      ? 'bg-warm-black text-white'
+                      : 'bg-white text-warm-black border border-warm-border hover:border-warm-black'
+                  }`}
+                >
+                  Floor {floor}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-xs font-medium text-warm-stone">Zoom: {Math.round(zoomLevel * 100)}%</p>
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -293,39 +337,18 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
         <g transform={`translate(${PADDING}, ${PADDING}) scale(${scale}) translate(${-bounds.minX}, ${-bounds.minY})`}>
           <rect x={bounds.minX} y={bounds.minY} width={bounds.width} height={bounds.height} fill="url(#grid)" />
 
+          {/* Room fills */}
           {rooms.map((room) => (
-            <g key={room.id}>
-              <rect
-                x={room.x}
-                y={room.y}
-                width={room.width}
-                height={room.height}
-                fill="#FAF7F2"
-                stroke="#C9A84C"
-                strokeWidth={0.2}
-                rx={0.2}
-              />
-              <text
-                x={room.x + room.width / 2}
-                y={room.y + room.height / 2}
-                fill="#1C1410"
-                fontSize={1.2}
-                textAnchor="middle"
-                dominantBaseline="middle"
-              >
-                {room.name}
-              </text>
-              <text
-                x={room.x + room.width / 2}
-                y={room.y + room.height / 2 + 1.5}
-                fill="#9C8E82"
-                fontSize={0.8}
-                textAnchor="middle"
-                dominantBaseline="middle"
-              >
-                {`${room.width}' \u00d7 ${room.height}'`}
-              </text>
-            </g>
+            <rect
+              key={`fill-${room.id}`}
+              x={room.x}
+              y={room.y}
+              width={room.width}
+              height={room.height}
+              fill="#FAF7F2"
+              stroke="#1A1A1A"
+              strokeWidth={0.15}
+            />
           ))}
 
           {walls.map((wall) => (
@@ -380,7 +403,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                     : `M ${segment.x1} ${segment.y1} A ${door.width} ${door.width} 0 0 ${arcSweep} ${segment.x2} ${segment.y2}`
                 }
                 fill="none"
-                stroke="#6B3F2A"
+                stroke="#1A1A1A"
                 strokeWidth={0.15}
               />
             )
@@ -397,7 +420,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
               const y = segment.y1
               const windowOffset = windowItem.wall === 'top' ? -offset : offset
               return (
-                <g key={windowItem.id} stroke="#8B5E3C" strokeWidth={0.12}>
+                <g key={windowItem.id} stroke="#1A1A1A" strokeWidth={0.12}>
                   <line x1={segment.x1} y1={y - windowOffset} x2={segment.x2} y2={y - windowOffset} />
                   <line x1={segment.x1} y1={y + windowOffset} x2={segment.x2} y2={y + windowOffset} />
                 </g>
@@ -407,9 +430,43 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
             const x = segment.x1
             const windowOffset = windowItem.wall === 'left' ? -offset : offset
             return (
-              <g key={windowItem.id} stroke="#8B5E3C" strokeWidth={0.12}>
+              <g key={windowItem.id} stroke="#1A1A1A" strokeWidth={0.12}>
                 <line x1={x - windowOffset} y1={segment.y1} x2={x - windowOffset} y2={segment.y2} />
                 <line x1={x + windowOffset} y1={segment.y1} x2={x + windowOffset} y2={segment.y2} />
+              </g>
+            )
+          })}
+
+          {/* Room labels — rendered last so they appear on top of doors/windows */}
+          {rooms.map((room) => {
+            const nameText = room.name
+            const maxByWidth = (room.width * 0.85) / Math.max(nameText.length * 0.6, 1)
+            const maxByHeight = room.height * 0.22
+            const fitSize = Math.min(1.2, maxByWidth, maxByHeight)
+            const dimSize = fitSize * 0.65
+            return (
+              <g key={`label-${room.id}`}>
+                <text
+                  x={room.x + room.width / 2}
+                  y={room.y + room.height / 2 - dimSize * 0.4}
+                  fill="#1C1410"
+                  fontSize={fitSize}
+                  fontWeight="600"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {nameText}
+                </text>
+                <text
+                  x={room.x + room.width / 2}
+                  y={room.y + room.height / 2 + fitSize * 0.9}
+                  fill="#9C8E82"
+                  fontSize={dimSize}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                >
+                  {`${room.width}' \u00d7 ${room.height}'`}
+                </text>
               </g>
             )
           })}
