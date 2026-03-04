@@ -14,6 +14,7 @@ type UnknownRecord = Record<string, unknown>
 type NormalizedRoom = {
   id: string
   name: string
+  type: string
   x: number
   y: number
   width: number
@@ -26,6 +27,7 @@ type NormalizedWall = {
   y1: number
   x2: number
   y2: number
+  exterior: boolean
 }
 
 type WallEdge = 'top' | 'bottom' | 'left' | 'right'
@@ -42,16 +44,16 @@ type NormalizedOpening = {
   y2?: number
 }
 
-function asNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value
-  }
+/* ------------------------------------------------------------------ */
+/*  Helpers                                                           */
+/* ------------------------------------------------------------------ */
 
+function asNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
     const parsed = Number(value)
     return Number.isFinite(parsed) ? parsed : null
   }
-
   return null
 }
 
@@ -83,6 +85,7 @@ function normalizeRooms(rooms: unknown): NormalizedRoom[] {
       return {
         id: String(item.id ?? `room-${index}`),
         name: String(item.name ?? item.label ?? `Room ${index + 1}`),
+        type: String(item.type ?? 'other'),
         x,
         y,
         width,
@@ -110,7 +113,9 @@ function normalizeWalls(walls: unknown): NormalizedWall[] {
 
       if (x1 === null || y1 === null || x2 === null || y2 === null) return null
 
-      return { id: String(item.id ?? `wall-${index}`), x1, y1, x2, y2 }
+      const exterior = item.exterior === true || item.type === 'exterior'
+
+      return { id: String(item.id ?? `wall-${index}`), x1, y1, x2, y2, exterior }
     })
     .filter((wall): wall is NormalizedWall => wall !== null)
 }
@@ -126,21 +131,16 @@ function normalizeOpenings(openings: unknown, kind: 'door' | 'window'): Normaliz
     const normalizedWall: WallEdge | undefined =
       wall === 'top' || wall === 'bottom' || wall === 'left' || wall === 'right' ? wall : undefined
 
-    const x1 = asNumber(item.x1)
-    const y1 = asNumber(item.y1)
-    const x2 = asNumber(item.x2)
-    const y2 = asNumber(item.y2)
-
     acc.push({
       id: String(item.id ?? `${kind}-${index}`),
       roomId: item.roomId ? String(item.roomId) : item.room_id ? String(item.room_id) : undefined,
       wall: normalizedWall,
       position: asNumber(item.position) ?? undefined,
       width: asNumber(item.width) ?? undefined,
-      x1: x1 ?? undefined,
-      y1: y1 ?? undefined,
-      x2: x2 ?? undefined,
-      y2: y2 ?? undefined,
+      x1: asNumber(item.x1) ?? undefined,
+      y1: asNumber(item.y1) ?? undefined,
+      x2: asNumber(item.x2) ?? undefined,
+      y2: asNumber(item.y2) ?? undefined,
     })
 
     return acc
@@ -170,15 +170,12 @@ function openingSegment(opening: NormalizedOpening, roomsById: Map<string, Norma
   if (opening.wall === 'top') {
     return { x1: room.x + start, y1: room.y, x2: room.x + end, y2: room.y }
   }
-
   if (opening.wall === 'bottom') {
     return { x1: room.x + start, y1: room.y + room.height, x2: room.x + end, y2: room.y + room.height }
   }
-
   if (opening.wall === 'left') {
     return { x1: room.x, y1: room.y + start, x2: room.x, y2: room.y + end }
   }
-
   return { x1: room.x + room.width, y1: room.y + start, x2: room.x + room.width, y2: room.y + end }
 }
 
@@ -213,9 +210,39 @@ function floorPlanBounds(rooms: NormalizedRoom[], walls: NormalizedWall[]) {
   }
 }
 
-function FloorPlanSvg({ floorPlanJson }: { floorPlanJson: FloorPlanResponse }) {
+/* ------------------------------------------------------------------ */
+/*  Detect exterior walls                                              */
+/* ------------------------------------------------------------------ */
+
+function classifyWalls(walls: NormalizedWall[], rooms: NormalizedRoom[]): NormalizedWall[] {
+  if (rooms.length === 0) return walls
+
+  const bounds = floorPlanBounds(rooms, [])
+  const tolerance = Math.max(bounds.width, bounds.height) * 0.02
+
+  return walls.map((wall) => {
+    if (wall.exterior) return wall
+
+    const onBoundary =
+      (Math.abs(wall.x1 - bounds.minX) < tolerance && Math.abs(wall.x2 - bounds.minX) < tolerance) ||
+      (Math.abs(wall.x1 - (bounds.minX + bounds.width)) < tolerance &&
+        Math.abs(wall.x2 - (bounds.minX + bounds.width)) < tolerance) ||
+      (Math.abs(wall.y1 - bounds.minY) < tolerance && Math.abs(wall.y2 - bounds.minY) < tolerance) ||
+      (Math.abs(wall.y1 - (bounds.minY + bounds.height)) < tolerance &&
+        Math.abs(wall.y2 - (bounds.minY + bounds.height)) < tolerance)
+
+    return { ...wall, exterior: onBoundary }
+  })
+}
+
+/* ------------------------------------------------------------------ */
+/*  SVG Floor Plan Renderer                                           */
+/* ------------------------------------------------------------------ */
+
+function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPlanResponse; projectTitle: string }) {
   const rooms = normalizeRooms(floorPlanJson.rooms)
-  const walls = normalizeWalls(floorPlanJson.walls)
+  const rawWalls = normalizeWalls(floorPlanJson.walls)
+  const walls = useMemo(() => classifyWalls(rawWalls, rooms), [rawWalls, rooms])
   const doors = normalizeOpenings(floorPlanJson.doors, 'door')
   const windows = normalizeOpenings(floorPlanJson.windows, 'window')
 
@@ -230,55 +257,91 @@ function FloorPlanSvg({ floorPlanJson }: { floorPlanJson: FloorPlanResponse }) {
   }
 
   const bounds = floorPlanBounds(rooms, walls)
-  const padding = Math.max(bounds.width, bounds.height) * 0.08
+  const padding = Math.max(bounds.width, bounds.height) * 0.15
   const viewBoxX = bounds.minX - padding
   const viewBoxY = bounds.minY - padding
   const viewBoxWidth = bounds.width + padding * 2
   const viewBoxHeight = bounds.height + padding * 2
 
   const base = Math.max(bounds.width, bounds.height)
-  const wallStroke = Math.max(base * 0.008, 0.8)
-  const roomStroke = Math.max(base * 0.0035, 0.5)
-  const windowStroke = Math.max(base * 0.003, 0.4)
-  const doorStroke = Math.max(base * 0.003, 0.4)
-  const labelSize = Math.max(base * 0.03, 2.8)
+  const extWallStroke = base * 0.006
+  const intWallStroke = base * 0.0035
+  const doorStroke = base * 0.003
+  const windowStroke = base * 0.0025
+  const labelSize = base * 0.025
+  const sqftSize = labelSize * 0.75
+  const gridStep = Math.max(1, Math.round(base / 20))
+  const shadowOffset = base * 0.004
+
+  const titleBlockW = base * 0.28
+  const titleBlockH = base * 0.12
+  const titleBlockX = viewBoxX + viewBoxWidth - padding * 0.6 - titleBlockW
+  const titleBlockY = viewBoxY + viewBoxHeight - padding * 0.6 - titleBlockH
+
+  const northArrowX = viewBoxX + viewBoxWidth - padding * 0.7
+  const northArrowY = viewBoxY + padding * 0.7
+  const arrowSize = base * 0.04
+
+  const gridStartX = Math.floor((viewBoxX) / gridStep) * gridStep
+  const gridStartY = Math.floor((viewBoxY) / gridStep) * gridStep
+  const gridEndX = viewBoxX + viewBoxWidth
+  const gridEndY = viewBoxY + viewBoxHeight
+  const gridLines: { x1: number; y1: number; x2: number; y2: number }[] = []
+  for (let x = gridStartX; x <= gridEndX; x += gridStep) {
+    gridLines.push({ x1: x, y1: viewBoxY, x2: x, y2: viewBoxY + viewBoxHeight })
+  }
+  for (let y = gridStartY; y <= gridEndY; y += gridStep) {
+    gridLines.push({ x1: viewBoxX, y1: y, x2: viewBoxX + viewBoxWidth, y2: y })
+  }
+
+  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 
   return (
-    <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-warm-white p-3">
+    <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-white p-3 shadow-sm">
       <svg
         className="h-auto w-full"
         viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`}
         preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="Generated floor plan"
+        style={{ fontFamily: "'Arial', 'Helvetica Neue', sans-serif" }}
       >
-        <rect x={viewBoxX} y={viewBoxY} width={viewBoxWidth} height={viewBoxHeight} fill="#F8F4ED" />
+        <defs>
+          <filter id="roomShadow">
+            <feDropShadow dx={shadowOffset} dy={shadowOffset} stdDeviation={shadowOffset * 0.8} floodColor="#00000018" />
+          </filter>
+        </defs>
 
-        {rooms.map((room) => (
-          <g key={room.id}>
-            <rect
-              x={room.x}
-              y={room.y}
-              width={room.width}
-              height={room.height}
-              fill="#FAF7F2"
-              stroke="#B79035"
-              strokeWidth={roomStroke}
-              rx={Math.max(base * 0.005, 0.8)}
-            />
-            <text
-              x={room.x + room.width / 2}
-              y={room.y + room.height / 2}
-              fontSize={labelSize}
-              fill="#1C1410"
-              textAnchor="middle"
-              dominantBaseline="middle"
-            >
-              {room.name}
-            </text>
-          </g>
+        {/* Background */}
+        <rect x={viewBoxX} y={viewBoxY} width={viewBoxWidth} height={viewBoxHeight} fill="#FAFAFA" />
+
+        {/* Grid */}
+        {gridLines.map((line, i) => (
+          <line
+            key={`grid-${i}`}
+            x1={line.x1}
+            y1={line.y1}
+            x2={line.x2}
+            y2={line.y2}
+            stroke="#E0E0E0"
+            strokeWidth={base * 0.0008}
+          />
         ))}
 
+        {/* Room fills */}
+        {rooms.map((room) => (
+          <rect
+            key={`fill-${room.id}`}
+            x={room.x}
+            y={room.y}
+            width={room.width}
+            height={room.height}
+            fill="#FFFFFF"
+            filter="url(#roomShadow)"
+          />
+        ))}
+
+        {/* Walls */}
         {walls.map((wall) => (
           <line
             key={wall.id}
@@ -286,85 +349,245 @@ function FloorPlanSvg({ floorPlanJson }: { floorPlanJson: FloorPlanResponse }) {
             y1={wall.y1}
             x2={wall.x2}
             y2={wall.y2}
-            stroke="#241914"
-            strokeWidth={wallStroke}
-            strokeLinecap="round"
+            stroke="#1A1A1A"
+            strokeWidth={wall.exterior ? extWallStroke : intWallStroke}
+            strokeLinecap="butt"
           />
         ))}
 
-        {doors.map((door) => {
-          const segment = openingSegment(door, roomsById)
-          if (!segment) return null
-
-          const dx = segment.x2 - segment.x1
-          const dy = segment.y2 - segment.y1
-          const width = Math.hypot(dx, dy)
-          if (width === 0) return null
-
-          const radius = width * 0.9
-          const sweep = dx >= 0 || dy >= 0 ? 1 : 0
-
-          return (
-            <g key={door.id}>
-              <line
-                x1={segment.x1}
-                y1={segment.y1}
-                x2={segment.x2}
-                y2={segment.y2}
-                stroke="#F8F4ED"
-                strokeWidth={wallStroke * 1.4}
-                strokeLinecap="round"
-              />
-              <path
-                d={`M ${segment.x1} ${segment.y1} A ${radius} ${radius} 0 0 ${sweep} ${segment.x2} ${segment.y2}`}
-                fill="none"
-                stroke="#6B3F2A"
-                strokeWidth={doorStroke}
-              />
-            </g>
-          )
-        })}
-
+        {/* Window openings — triple-line symbol */}
         {windows.map((windowItem) => {
-          const segment = openingSegment(windowItem, roomsById)
-          if (!segment) return null
+          const seg = openingSegment(windowItem, roomsById)
+          if (!seg) return null
 
-          const dx = segment.x2 - segment.x1
-          const dy = segment.y2 - segment.y1
-          const length = Math.hypot(dx, dy)
-          if (length === 0) return null
+          const dx = seg.x2 - seg.x1
+          const dy = seg.y2 - seg.y1
+          const len = Math.hypot(dx, dy)
+          if (len === 0) return null
 
-          const nx = -dy / length
-          const ny = dx / length
-          const offset = Math.max(base * 0.006, 0.8)
+          const nx = -dy / len
+          const ny = dx / len
+          const gap = base * 0.006
 
           return (
             <g key={windowItem.id}>
+              {/* Erase wall behind window */}
               <line
-                x1={segment.x1 + nx * offset}
-                y1={segment.y1 + ny * offset}
-                x2={segment.x2 + nx * offset}
-                y2={segment.y2 + ny * offset}
-                stroke="#507A9A"
+                x1={seg.x1}
+                y1={seg.y1}
+                x2={seg.x2}
+                y2={seg.y2}
+                stroke="#FFFFFF"
+                strokeWidth={extWallStroke * 1.6}
+              />
+              {/* Three parallel lines */}
+              <line
+                x1={seg.x1 + nx * gap}
+                y1={seg.y1 + ny * gap}
+                x2={seg.x2 + nx * gap}
+                y2={seg.y2 + ny * gap}
+                stroke="#1A1A1A"
                 strokeWidth={windowStroke}
-                strokeLinecap="round"
               />
               <line
-                x1={segment.x1 - nx * offset}
-                y1={segment.y1 - ny * offset}
-                x2={segment.x2 - nx * offset}
-                y2={segment.y2 - ny * offset}
-                stroke="#507A9A"
+                x1={seg.x1}
+                y1={seg.y1}
+                x2={seg.x2}
+                y2={seg.y2}
+                stroke="#1A1A1A"
                 strokeWidth={windowStroke}
-                strokeLinecap="round"
+              />
+              <line
+                x1={seg.x1 - nx * gap}
+                y1={seg.y1 - ny * gap}
+                x2={seg.x2 - nx * gap}
+                y2={seg.y2 - ny * gap}
+                stroke="#1A1A1A"
+                strokeWidth={windowStroke}
               />
             </g>
           )
         })}
+
+        {/* Door openings — quarter-circle arc swing */}
+        {doors.map((door) => {
+          const seg = openingSegment(door, roomsById)
+          if (!seg) return null
+
+          const dx = seg.x2 - seg.x1
+          const dy = seg.y2 - seg.y1
+          const width = Math.hypot(dx, dy)
+          if (width === 0) return null
+
+          const radius = width
+          const isHorizontal = Math.abs(dx) > Math.abs(dy)
+
+          let arcEndX: number
+          let arcEndY: number
+          let sweep: number
+
+          if (isHorizontal) {
+            arcEndX = seg.x1
+            arcEndY = seg.y1 + (dy >= 0 ? -radius : radius)
+            sweep = dx > 0 ? 0 : 1
+          } else {
+            arcEndX = seg.x1 + (dx >= 0 ? radius : -radius)
+            arcEndY = seg.y1
+            sweep = dy > 0 ? 1 : 0
+          }
+
+          return (
+            <g key={door.id}>
+              {/* Erase wall behind door */}
+              <line
+                x1={seg.x1}
+                y1={seg.y1}
+                x2={seg.x2}
+                y2={seg.y2}
+                stroke="#FFFFFF"
+                strokeWidth={extWallStroke * 1.6}
+              />
+              {/* Door leaf line */}
+              <line
+                x1={seg.x1}
+                y1={seg.y1}
+                x2={arcEndX}
+                y2={arcEndY}
+                stroke="#444444"
+                strokeWidth={doorStroke}
+              />
+              {/* Arc swing */}
+              <path
+                d={`M ${arcEndX} ${arcEndY} A ${radius} ${radius} 0 0 ${sweep} ${seg.x2} ${seg.y2}`}
+                fill="none"
+                stroke="#444444"
+                strokeWidth={doorStroke}
+                strokeDasharray={`${base * 0.008} ${base * 0.004}`}
+              />
+            </g>
+          )
+        })}
+
+        {/* Room labels */}
+        {rooms.map((room) => {
+          const sqft = Math.round(room.width * room.height)
+          return (
+            <g key={`label-${room.id}`}>
+              <text
+                x={room.x + room.width / 2}
+                y={room.y + room.height / 2 - sqftSize * 0.4}
+                fontSize={labelSize}
+                fontWeight="600"
+                fill="#333333"
+                textAnchor="middle"
+                dominantBaseline="middle"
+                letterSpacing={base * 0.002}
+              >
+                {room.name.toUpperCase()}
+              </text>
+              <text
+                x={room.x + room.width / 2}
+                y={room.y + room.height / 2 + labelSize * 0.9}
+                fontSize={sqftSize}
+                fontWeight="300"
+                fill="#888888"
+                textAnchor="middle"
+                dominantBaseline="middle"
+              >
+                {sqft} sq ft
+              </text>
+            </g>
+          )
+        })}
+
+        {/* North arrow */}
+        <g>
+          <line
+            x1={northArrowX}
+            y1={northArrowY + arrowSize}
+            x2={northArrowX}
+            y2={northArrowY - arrowSize}
+            stroke="#333333"
+            strokeWidth={base * 0.002}
+          />
+          <polygon
+            points={`${northArrowX},${northArrowY - arrowSize} ${northArrowX - arrowSize * 0.35},${northArrowY - arrowSize * 0.4} ${northArrowX + arrowSize * 0.35},${northArrowY - arrowSize * 0.4}`}
+            fill="#333333"
+          />
+          <text
+            x={northArrowX}
+            y={northArrowY - arrowSize - base * 0.008}
+            fontSize={labelSize * 0.8}
+            fontWeight="700"
+            fill="#333333"
+            textAnchor="middle"
+          >
+            N
+          </text>
+        </g>
+
+        {/* Title block */}
+        <g>
+          <rect
+            x={titleBlockX}
+            y={titleBlockY}
+            width={titleBlockW}
+            height={titleBlockH}
+            fill="#FFFFFF"
+            stroke="#333333"
+            strokeWidth={base * 0.002}
+          />
+          {/* Horizontal divider */}
+          <line
+            x1={titleBlockX}
+            y1={titleBlockY + titleBlockH * 0.45}
+            x2={titleBlockX + titleBlockW}
+            y2={titleBlockY + titleBlockH * 0.45}
+            stroke="#333333"
+            strokeWidth={base * 0.001}
+          />
+          <text
+            x={titleBlockX + titleBlockW / 2}
+            y={titleBlockY + titleBlockH * 0.25}
+            fontSize={labelSize * 0.8}
+            fontWeight="700"
+            fill="#1A1A1A"
+            textAnchor="middle"
+            dominantBaseline="middle"
+          >
+            {projectTitle || 'FLOOR PLAN'}
+          </text>
+          <text
+            x={titleBlockX + titleBlockW * 0.3}
+            y={titleBlockY + titleBlockH * 0.72}
+            fontSize={labelSize * 0.55}
+            fontWeight="400"
+            fill="#666666"
+            textAnchor="middle"
+            dominantBaseline="middle"
+          >
+            {today}
+          </text>
+          <text
+            x={titleBlockX + titleBlockW * 0.7}
+            y={titleBlockY + titleBlockH * 0.72}
+            fontSize={labelSize * 0.55}
+            fontWeight="400"
+            fill="#666666"
+            textAnchor="middle"
+            dominantBaseline="middle"
+          >
+            1 sq = {gridStep} ft
+          </text>
+        </g>
       </svg>
     </div>
   )
 }
+
+/* ------------------------------------------------------------------ */
+/*  Main Component                                                    */
+/* ------------------------------------------------------------------ */
 
 export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps) {
   const [promptValue, setPromptValue] = useState(project.prompt)
@@ -493,7 +716,7 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
       {error && <p className="text-sm text-red-700">{error}</p>}
 
       {project.floor_plan_json ? (
-        <FloorPlanSvg floorPlanJson={project.floor_plan_json as FloorPlanResponse} />
+        <FloorPlanSvg floorPlanJson={project.floor_plan_json as FloorPlanResponse} projectTitle={project.title} />
       ) : (
         <div className="rounded-xl border-2 border-dashed border-warm-border bg-cream p-8 text-center text-warm-stone">
           Your generated floor plan will appear here.
