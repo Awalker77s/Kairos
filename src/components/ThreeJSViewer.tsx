@@ -21,6 +21,17 @@ export type ThreeJSViewerHandle = {
   captureView: () => void
 }
 
+const FLOOR_HEIGHT = 3.2
+const FLOOR_SLAB_THICKNESS = 0.12
+const WALL_THICKNESS = 0.12
+
+type StairAnchor = {
+  id: string
+  floorNumber: number
+  centerX: number
+  centerZ: number
+}
+
 function CaptureRegistrar({ onCaptureReady }: { onCaptureReady: (capture: () => void) => void }) {
   const { gl } = useThree()
 
@@ -71,9 +82,17 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
   const allWindows = useMemo(() => normalizeWindows(floorPlanJson && (floorPlanJson as Record<string, unknown>).windows), [floorPlanJson])
 
   const floors = normalized?.floors ?? []
+
+  useEffect(() => {
+    if (selectedFloorIndex >= floors.length) {
+      setSelectedFloorIndex(0)
+    }
+  }, [floors.length, selectedFloorIndex])
+
   const currentFloor = floors[selectedFloorIndex] ?? floors[0]
   const rooms: NormalizedRoom[] = currentFloor?.rooms ?? []
-  const roomIds = useMemo(() => new Set(rooms.map((r) => r.id)), [rooms])
+  const allRooms = normalized?.rooms ?? []
+  const roomIds = useMemo(() => new Set(allRooms.map((r) => r.id)), [allRooms])
   const windows = useMemo(() => allWindows.filter((w) => !w.roomId || roomIds.has(w.roomId)), [allWindows, roomIds])
 
   const handleCaptureReady = useCallback((fn: () => void) => {
@@ -86,23 +105,73 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
   }))
 
   const bounds = useMemo(() => {
-    if (rooms.length === 0) {
+    if (allRooms.length === 0) {
       return { centerX: 0, centerY: 0, span: 10 }
     }
 
-    const minX = Math.min(...rooms.map((room) => room.x))
-    const maxX = Math.max(...rooms.map((room) => room.x + room.width))
-    const minY = Math.min(...rooms.map((room) => room.y))
-    const maxY = Math.max(...rooms.map((room) => room.y + room.height))
+    const minX = Math.min(...allRooms.map((room) => room.x))
+    const maxX = Math.max(...allRooms.map((room) => room.x + room.width))
+    const minY = Math.min(...allRooms.map((room) => room.y))
+    const maxY = Math.max(...allRooms.map((room) => room.y + room.height))
 
     return {
       centerX: (minX + maxX) / 2,
       centerY: (minY + maxY) / 2,
       span: Math.max(maxX - minX, maxY - minY),
     }
-  }, [rooms])
+  }, [allRooms])
 
-  const roomById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
+  const roomById = useMemo(() => new Map(allRooms.map((room) => [room.id, room])), [allRooms])
+
+  const stairConnections = useMemo(() => {
+    const stairs: StairAnchor[] = allRooms
+      .filter((room) => {
+        const name = room.name.toLowerCase()
+        const type = room.type.toLowerCase()
+        return name.includes('stair') || type.includes('stair')
+      })
+      .map((room) => ({
+        id: room.id,
+        floorNumber: room.floor,
+        centerX: room.x + room.width / 2,
+        centerZ: -(room.y + room.height / 2),
+      }))
+
+    const byFloor = new Map<number, StairAnchor[]>()
+    stairs.forEach((stair) => {
+      byFloor.set(stair.floorNumber, [...(byFloor.get(stair.floorNumber) ?? []), stair])
+    })
+
+    const links: Array<{ id: string; x: number; z: number; y: number; height: number }> = []
+    for (let i = 0; i < floors.length - 1; i += 1) {
+      const fromFloor = floors[i].floorNumber
+      const toFloor = floors[i + 1].floorNumber
+      const fromStairs = byFloor.get(fromFloor) ?? []
+      const toStairs = byFloor.get(toFloor) ?? []
+
+      fromStairs.forEach((fromStair) => {
+        const closest = toStairs
+          .map((toStair) => ({
+            stair: toStair,
+            distance: Math.hypot(toStair.centerX - fromStair.centerX, toStair.centerZ - fromStair.centerZ),
+          }))
+          .sort((a, b) => a.distance - b.distance)[0]
+
+        if (!closest || closest.distance > 1.5) return
+
+        const lowerFloorIndex = Math.min(i, i + 1)
+        links.push({
+          id: `${fromStair.id}-${closest.stair.id}`,
+          x: fromStair.centerX,
+          z: fromStair.centerZ,
+          y: lowerFloorIndex * FLOOR_HEIGHT + FLOOR_HEIGHT / 2,
+          height: FLOOR_HEIGHT,
+        })
+      })
+    }
+
+    return links
+  }, [allRooms, floors])
 
   if (!normalized || rooms.length === 0) {
     return (
@@ -146,51 +215,98 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
         <ambientLight intensity={0.6} />
         <directionalLight castShadow intensity={0.8} position={[bounds.centerX + bounds.span * 0.7, 20, -bounds.centerY - bounds.span * 0.7]} />
 
-        {rooms.map((room) => {
-          const centerX = room.x + room.width / 2
-          const centerZ = -(room.y + room.height / 2)
-          const wallThickness = 0.15
-          const wallHeight = 9
+        {floors.map((floor, floorIndex) => {
+          const isActiveFloor = floor.floorNumber === currentFloor.floorNumber
+          const floorBaseY = floorIndex * FLOOR_HEIGHT
 
           return (
-            <group key={room.id}>
-              <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, 0, centerZ]} receiveShadow>
-                <planeGeometry args={[room.width, room.height]} />
-                <meshStandardMaterial color="#d9d9d9" />
-              </mesh>
-              <mesh castShadow position={[centerX, wallHeight / 2, -room.y]}>
-                <boxGeometry args={[room.width, wallHeight, wallThickness]} />
-                <meshStandardMaterial color="#f8f8f5" />
-              </mesh>
-              <mesh castShadow position={[centerX, wallHeight / 2, -(room.y + room.height)]}>
-                <boxGeometry args={[room.width, wallHeight, wallThickness]} />
-                <meshStandardMaterial color="#f8f8f5" />
-              </mesh>
-              <mesh castShadow position={[room.x, wallHeight / 2, centerZ]}>
-                <boxGeometry args={[wallThickness, wallHeight, room.height]} />
-                <meshStandardMaterial color="#f8f8f5" />
-              </mesh>
-              <mesh castShadow position={[room.x + room.width, wallHeight / 2, centerZ]}>
-                <boxGeometry args={[wallThickness, wallHeight, room.height]} />
-                <meshStandardMaterial color="#f8f8f5" />
-              </mesh>
+            <group key={`floor-${floor.floorNumber}`}>
+              {floor.rooms.map((room) => {
+                const centerX = room.x + room.width / 2
+                const centerZ = -(room.y + room.height / 2)
 
-              {showCeiling && (
-                <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, wallHeight, centerZ]}>
-                  <planeGeometry args={[room.width, room.height]} />
-                  <meshStandardMaterial color="#ffffff" transparent opacity={0.2} side={THREE.DoubleSide} />
-                </mesh>
-              )}
+                return (
+                  <group key={room.id}>
+                    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, floorBaseY + FLOOR_SLAB_THICKNESS / 2, centerZ]} receiveShadow>
+                      <boxGeometry args={[room.width, FLOOR_SLAB_THICKNESS, room.height]} />
+                      <meshStandardMaterial
+                        color={isActiveFloor ? '#d9d9d9' : '#9aa0a8'}
+                        transparent={!isActiveFloor}
+                        opacity={isActiveFloor ? 1 : 0.25}
+                        wireframe={!isActiveFloor}
+                      />
+                    </mesh>
+                    <mesh castShadow position={[centerX, floorBaseY + FLOOR_HEIGHT / 2, -room.y]}>
+                      <boxGeometry args={[room.width, FLOOR_HEIGHT, WALL_THICKNESS]} />
+                      <meshStandardMaterial
+                        color={isActiveFloor ? '#f1e2c8' : '#94a3b8'}
+                        transparent={!isActiveFloor}
+                        opacity={isActiveFloor ? 1 : 0.25}
+                        wireframe={!isActiveFloor}
+                      />
+                    </mesh>
+                    <mesh castShadow position={[centerX, floorBaseY + FLOOR_HEIGHT / 2, -(room.y + room.height)]}>
+                      <boxGeometry args={[room.width, FLOOR_HEIGHT, WALL_THICKNESS]} />
+                      <meshStandardMaterial
+                        color={isActiveFloor ? '#f1e2c8' : '#94a3b8'}
+                        transparent={!isActiveFloor}
+                        opacity={isActiveFloor ? 1 : 0.25}
+                        wireframe={!isActiveFloor}
+                      />
+                    </mesh>
+                    <mesh castShadow position={[room.x, floorBaseY + FLOOR_HEIGHT / 2, centerZ]}>
+                      <boxGeometry args={[WALL_THICKNESS, FLOOR_HEIGHT, room.height]} />
+                      <meshStandardMaterial
+                        color={isActiveFloor ? '#f1e2c8' : '#94a3b8'}
+                        transparent={!isActiveFloor}
+                        opacity={isActiveFloor ? 1 : 0.25}
+                        wireframe={!isActiveFloor}
+                      />
+                    </mesh>
+                    <mesh castShadow position={[room.x + room.width, floorBaseY + FLOOR_HEIGHT / 2, centerZ]}>
+                      <boxGeometry args={[WALL_THICKNESS, FLOOR_HEIGHT, room.height]} />
+                      <meshStandardMaterial
+                        color={isActiveFloor ? '#f1e2c8' : '#94a3b8'}
+                        transparent={!isActiveFloor}
+                        opacity={isActiveFloor ? 1 : 0.25}
+                        wireframe={!isActiveFloor}
+                      />
+                    </mesh>
+
+                    {showCeiling && (
+                      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[centerX, floorBaseY + FLOOR_HEIGHT, centerZ]}>
+                        <planeGeometry args={[room.width, room.height]} />
+                        <meshStandardMaterial
+                          color={isActiveFloor ? '#fff3d6' : '#d0d6df'}
+                          transparent
+                          opacity={isActiveFloor ? 0.3 : 0.12}
+                          wireframe={!isActiveFloor}
+                          side={THREE.DoubleSide}
+                        />
+                      </mesh>
+                    )}
+                  </group>
+                )
+              })}
             </group>
           )
         })}
+
+        {stairConnections.map((link) => (
+          <mesh key={link.id} position={[link.x, link.y, link.z]}>
+            <cylinderGeometry args={[0.3, 0.3, link.height, 12]} />
+            <meshStandardMaterial color="#d4a648" transparent opacity={0.8} />
+          </mesh>
+        ))}
 
         {windows.map((windowSpec) => {
           const room = roomById.get(windowSpec.roomId)
           if (!room) return null
 
           const windowHeight = 3
-          const wallMidY = 4.5
+          const floorIndex = floors.findIndex((floor) => floor.floorNumber === room.floor)
+          const floorBaseY = Math.max(0, floorIndex) * FLOOR_HEIGHT
+          const wallMidY = floorBaseY + FLOOR_HEIGHT / 2
           const inset = 0.08
           const halfWidth = windowSpec.width / 2
 
@@ -220,7 +336,7 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
         <OrbitControls
           enableDamping
           dampingFactor={0.08}
-          target={[bounds.centerX, 3, -bounds.centerY]}
+          target={[bounds.centerX, Math.max(3, ((floors.length - 1) * FLOOR_HEIGHT) / 2), -bounds.centerY]}
           minPolarAngle={0.25}
           maxPolarAngle={Math.PI / 2.1}
         />

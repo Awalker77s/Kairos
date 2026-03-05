@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { updateProject } from '../../lib/projects'
 import { supabase } from '../../lib/supabase'
 import { normalizeFloorPlan } from '../../lib/floorPlanSchema'
@@ -212,6 +212,12 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
 
   // Use structured floors from normalizer
   const floors = floorPlan?.floors ?? []
+
+  useEffect(() => {
+    if (selectedFloorIndex >= floors.length) {
+      setSelectedFloorIndex(0)
+    }
+  }, [floors.length, selectedFloorIndex])
   const currentFloor = floors[selectedFloorIndex] ?? floors[0]
   const floorImages = (Array.isArray(floorPlanJson.floor_images) ? floorPlanJson.floor_images : []).reduce<FloorImage[]>((acc, item) => {
     if (!item || typeof item !== 'object') return acc

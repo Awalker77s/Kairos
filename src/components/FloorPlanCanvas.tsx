@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { normalizeFloorPlan } from '../lib/floorPlanSchema'
 import type { NormalizedRoom } from '../lib/floorPlanSchema'
 
@@ -178,6 +178,12 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
 
   const floorPlan = normalized!
   const floors = floorPlan.floors
+
+  useEffect(() => {
+    if (selectedFloorIndex >= floors.length) {
+      setSelectedFloorIndex(0)
+    }
+  }, [floors.length, selectedFloorIndex])
   const currentFloor = floors[selectedFloorIndex] ?? floors[0]
   const rooms = currentFloor.rooms
 
