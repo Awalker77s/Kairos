@@ -1,17 +1,8 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
-
-type FloorPlanRoom = {
-  id: string
-  name: string
-  type: string
-  x: number
-  y: number
-  width: number
-  height: number
-}
+import { normalizeFloorPlan, type NormalizedRoom } from '../lib/floorPlanSchema'
 
 type FloorPlanWindow = {
   id: string
@@ -19,11 +10,6 @@ type FloorPlanWindow = {
   wall: 'top' | 'bottom' | 'left' | 'right'
   position: number
   width: number
-}
-
-type FloorPlanJson = {
-  rooms: FloorPlanRoom[]
-  windows?: FloorPlanWindow[]
 }
 
 type ThreeJSViewerProps = {
@@ -51,8 +37,26 @@ function CaptureRegistrar({ onCaptureReady }: { onCaptureReady: (capture: () => 
   return null
 }
 
-function isFloorPlanJson(value: Record<string, unknown> | null): value is FloorPlanJson {
-  return Boolean(value && Array.isArray(value.rooms))
+function normalizeWindows(raw: unknown): FloorPlanWindow[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const w = item as Record<string, unknown>
+      const wall = w.wall
+      if (wall !== 'top' && wall !== 'bottom' && wall !== 'left' && wall !== 'right') return null
+      const position = typeof w.position === 'number' ? w.position : null
+      const width = typeof w.width === 'number' ? w.width : null
+      if (position === null || width === null) return null
+      return {
+        id: String(w.id ?? `win-${index}`),
+        roomId: String(w.roomId ?? w.room_id ?? ''),
+        wall,
+        position,
+        width,
+      }
+    })
+    .filter((w): w is FloorPlanWindow => w !== null)
 }
 
 export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>(function ThreeJSViewer(
@@ -60,14 +64,25 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
   ref,
 ) {
   const [showCeiling, setShowCeiling] = useState(true)
-  const [captureFn, setCaptureFn] = useState<() => void>(() => () => undefined)
-  const hasFloorPlan = isFloorPlanJson(floorPlanJson)
-  const rooms = hasFloorPlan ? floorPlanJson.rooms : []
-  const windows = hasFloorPlan ? floorPlanJson.windows ?? [] : []
+  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0)
+  const captureFnRef = useRef<() => void>(() => undefined)
+
+  const normalized = useMemo(() => normalizeFloorPlan(floorPlanJson), [floorPlanJson])
+  const allWindows = useMemo(() => normalizeWindows(floorPlanJson && (floorPlanJson as Record<string, unknown>).windows), [floorPlanJson])
+
+  const floors = normalized?.floors ?? []
+  const currentFloor = floors[selectedFloorIndex] ?? floors[0]
+  const rooms: NormalizedRoom[] = currentFloor?.rooms ?? []
+  const roomIds = useMemo(() => new Set(rooms.map((r) => r.id)), [rooms])
+  const windows = useMemo(() => allWindows.filter((w) => !w.roomId || roomIds.has(w.roomId)), [allWindows, roomIds])
+
+  const handleCaptureReady = useCallback((fn: () => void) => {
+    captureFnRef.current = fn
+  }, [])
 
   useImperativeHandle(ref, () => ({
     toggleCeiling: () => setShowCeiling((previous) => !previous),
-    captureView: () => captureFn(),
+    captureView: () => captureFnRef.current(),
   }))
 
   const bounds = useMemo(() => {
@@ -89,7 +104,7 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
 
   const roomById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
 
-  if (!hasFloorPlan) {
+  if (!normalized || rooms.length === 0) {
     return (
       <div className="flex min-h-[420px] items-center justify-center rounded-xl border-2 border-dashed border-warm-border bg-cream text-warm-stone">
         Generate a floor plan first
@@ -98,7 +113,26 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
   }
 
   return (
-    <div className="h-[520px] overflow-hidden rounded-xl border border-warm-border bg-cream-dark">
+    <div className="overflow-hidden rounded-xl border border-warm-border bg-cream-dark">
+      {floors.length > 1 && (
+        <div className="flex items-center gap-2 border-b border-warm-border bg-cream px-4 py-2">
+          {floors.map((floor, index) => (
+            <button
+              key={floor.floorNumber}
+              type="button"
+              onClick={() => setSelectedFloorIndex(index)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                selectedFloorIndex === index
+                  ? 'bg-warm-black text-white'
+                  : 'bg-white text-warm-black border border-warm-border hover:border-warm-black'
+              }`}
+            >
+              {floor.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="h-[520px]">
       <Canvas
         shadows
         camera={{
@@ -190,8 +224,9 @@ export const ThreeJSViewer = forwardRef<ThreeJSViewerHandle, ThreeJSViewerProps>
           minPolarAngle={0.25}
           maxPolarAngle={Math.PI / 2.1}
         />
-        <CaptureRegistrar onCaptureReady={setCaptureFn} />
+        <CaptureRegistrar onCaptureReady={handleCaptureReady} />
       </Canvas>
+      </div>
     </div>
   )
 })
