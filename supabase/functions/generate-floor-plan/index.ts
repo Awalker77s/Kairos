@@ -22,6 +22,30 @@ type FloorPlanJson = {
   walls?: Array<Record<string, unknown>>
   doors?: Array<Record<string, unknown>>
   windows?: Array<Record<string, unknown>>
+  building?: {
+    name?: string
+    style?: string
+    floors?: Array<{
+      floorNumber?: number
+      label?: string
+      dimensions?: { width?: number; height?: number }
+      rooms?: FloorPlanRoom[]
+    }>
+  }
+  floor_images?: Array<{
+    floor_number: number
+    floor_label: string
+    image_url: string
+    prompt_used: string
+  }>
+}
+
+type FloorImageSpec = {
+  floorNumber: number
+  label: string
+  width: number
+  height: number
+  rooms: FloorPlanRoom[]
 }
 
 const SYSTEM_PROMPT = `You are a licensed residential architect with decades of experience designing homes. Given a natural language description of a home or space, you will design a professional floor plan and return ONLY valid JSON — no explanation, no markdown, just raw JSON.
@@ -138,6 +162,139 @@ async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<
   return parseFloorPlanJson(content)
 }
 
+function collectFloors(floorPlan: FloorPlanJson): FloorImageSpec[] {
+  const structuredFloors = floorPlan.building?.floors
+  if (Array.isArray(structuredFloors) && structuredFloors.length > 0) {
+    return structuredFloors
+      .map((floor, index) => {
+        const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : index + 1
+        const label = typeof floor.label === 'string' ? floor.label : `Floor ${floorNumber}`
+        const rooms = Array.isArray(floor.rooms) ? floor.rooms : []
+        const width =
+          typeof floor.dimensions?.width === 'number'
+            ? floor.dimensions.width
+            : Math.max(...rooms.map((room) => room.x + room.width), 0)
+        const height =
+          typeof floor.dimensions?.height === 'number'
+            ? floor.dimensions.height
+            : Math.max(...rooms.map((room) => room.y + room.height), 0)
+
+        return {
+          floorNumber,
+          label,
+          width: Math.max(1, width),
+          height: Math.max(1, height),
+          rooms,
+        }
+      })
+      .sort((a, b) => a.floorNumber - b.floorNumber)
+  }
+
+  const floorMap = new Map<number, FloorPlanRoom[]>()
+  for (const room of floorPlan.rooms) {
+    const existing = floorMap.get(room.floor) ?? []
+    existing.push(room)
+    floorMap.set(room.floor, existing)
+  }
+
+  return Array.from(floorMap.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([floorNumber, rooms]) => ({
+      floorNumber,
+      label: floorNumber === 1 ? 'Ground Floor' : `Floor ${floorNumber}`,
+      width: Math.max(...rooms.map((room) => room.x + room.width), 1),
+      height: Math.max(...rooms.map((room) => room.y + room.height), 1),
+      rooms,
+    }))
+}
+
+function floorRoomSummary(rooms: FloorPlanRoom[]): string {
+  return rooms
+    .map(
+      (room) =>
+        `${room.name} (${room.type}) at x:${room.x}, y:${room.y}, w:${room.width}, h:${room.height}`,
+    )
+    .join('; ')
+}
+
+async function generateFloorImage(openAiApiKey: string, prompt: string): Promise<string> {
+  const openAiResponse = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${openAiApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-image-1',
+      prompt,
+      size: '1024x1024',
+    }),
+  })
+
+  if (!openAiResponse.ok) {
+    const errorText = await openAiResponse.text()
+    throw new Error(`OpenAI image generation failed (${openAiResponse.status}): ${errorText}`)
+  }
+
+  const payload = await openAiResponse.json()
+  const imageBase64 = payload?.data?.[0]?.b64_json
+
+  if (typeof imageBase64 !== 'string') {
+    throw new Error('OpenAI did not return image data for floor plan rendering.')
+  }
+
+  return imageBase64
+}
+
+async function generateFloorImages(
+  floorPlan: FloorPlanJson,
+  projectId: string,
+  userId: string,
+  buildingStyle: string,
+  openAiApiKey: string,
+  adminClient: ReturnType<typeof createClient>,
+) {
+  const floors = collectFloors(floorPlan)
+  if (floors.length === 0) return []
+
+  const floorImages: FloorPlanJson['floor_images'] = []
+
+  for (let index = 0; index < floors.length; index += 1) {
+    const floor = floors[index]
+    const previousFloor = index > 0 ? floors[index - 1] : null
+
+    const prompt = `Architectural top-down floor plan for ${floor.label} of a ${buildingStyle || 'residential'} building. Rooms: ${floorRoomSummary(
+      floor.rooms,
+    )}.\nThe building footprint is ${floor.width}x${floor.height} meters. Structural walls and staircase must align with the floor below.\nFloor below context: ${
+      previousFloor ? floorRoomSummary(previousFloor.rooms) : 'No floor below. Set baseline footprint and core structure.'
+    }\nClean, technical drawing style, warm tones, consistent scale.`
+
+    const imageBase64 = await generateFloorImage(openAiApiKey, prompt)
+    const imageBytes = Uint8Array.from(atob(imageBase64), (char) => char.charCodeAt(0))
+    const storagePath = `${userId}/${projectId}/floors/floor-${floor.floorNumber}.png`
+
+    const { error: uploadError } = await adminClient.storage.from('room-renders').upload(storagePath, imageBytes, {
+      contentType: 'image/png',
+      upsert: true,
+    })
+
+    if (uploadError) {
+      throw new Error(uploadError.message)
+    }
+
+    const { data: publicUrlData } = adminClient.storage.from('room-renders').getPublicUrl(storagePath)
+
+    floorImages.push({
+      floor_number: floor.floorNumber,
+      floor_label: floor.label,
+      image_url: publicUrlData.publicUrl,
+      prompt_used: prompt,
+    })
+  }
+
+  return floorImages
+}
+
 serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', {
@@ -210,9 +367,28 @@ serve(async (request) => {
       }
     }
 
+    let floorImages: FloorPlanJson['floor_images'] = []
+    try {
+      floorImages = await generateFloorImages(
+        floorPlan,
+        projectId,
+        userId,
+        floorPlan.building?.style ?? '',
+        openAiApiKey,
+        adminClient,
+      )
+    } catch (imageError) {
+      console.error('Floor image generation failed:', imageError)
+    }
+
+    const floorPlanWithImages: FloorPlanJson = {
+      ...floorPlan,
+      floor_images: floorImages,
+    }
+
     const { error: updateError } = await adminClient
       .from('projects')
-      .update({ floor_plan_json: floorPlan, status: 'floor_plan' })
+      .update({ floor_plan_json: floorPlanWithImages, status: 'floor_plan' })
       .eq('id', projectId)
       .eq('user_id', userId)
 
@@ -220,7 +396,7 @@ serve(async (request) => {
       return jsonResponse({ error: updateError.message }, 500)
     }
 
-    return jsonResponse(floorPlan)
+    return jsonResponse(floorPlanWithImages)
   } catch (e) {
     console.error('Unhandled error:', e)
     return jsonResponse({ error: 'Internal server error' }, 500)

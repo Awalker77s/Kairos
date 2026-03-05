@@ -13,6 +13,13 @@ type Step1FloorPlanProps = {
 type FloorPlanResponse = Record<string, unknown>
 type UnknownRecord = Record<string, unknown>
 
+type FloorImage = {
+  floor_number: number
+  floor_label: string
+  image_url: string
+  prompt_used: string
+}
+
 type NormalizedWall = {
   id: string
   x1: number
@@ -206,6 +213,24 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
   // Use structured floors from normalizer
   const floors = floorPlan?.floors ?? []
   const currentFloor = floors[selectedFloorIndex] ?? floors[0]
+  const floorImages = (Array.isArray(floorPlanJson.floor_images) ? floorPlanJson.floor_images : []).reduce<FloorImage[]>((acc, item) => {
+    if (!item || typeof item !== 'object') return acc
+    const value = item as UnknownRecord
+    const floorNumber = asNumber(value.floor_number)
+    const floorLabel = typeof value.floor_label === 'string' ? value.floor_label : null
+    const imageUrl = typeof value.image_url === 'string' ? value.image_url : null
+    const promptUsed = typeof value.prompt_used === 'string' ? value.prompt_used : ''
+
+    if (floorNumber === null || !floorLabel || !imageUrl) return acc
+
+    acc.push({ floor_number: floorNumber, floor_label: floorLabel, image_url: imageUrl, prompt_used: promptUsed })
+    return acc
+  }, [])
+
+  const currentFloorImage =
+    (currentFloor && floorImages.find((image) => image.floor_number === currentFloor.floorNumber)) ??
+    floorImages[selectedFloorIndex] ??
+    null
 
   // Get rooms for the selected floor
   const rooms = useMemo(() => currentFloor?.rooms ?? [], [currentFloor])
@@ -306,6 +331,15 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
         </div>
       )}
       <div className="p-3">
+      {currentFloorImage && (
+        <div className="mb-3 overflow-hidden rounded-xl border border-warm-border bg-cream">
+          <img
+            src={currentFloorImage.image_url}
+            alt={`Generated architectural plan for ${currentFloorImage.floor_label}`}
+            className="h-auto w-full"
+          />
+        </div>
+      )}
       <svg
         className="h-auto w-full"
         viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`}
