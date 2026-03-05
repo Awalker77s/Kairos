@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { updateProject } from '../../lib/projects'
 import { supabase } from '../../lib/supabase'
+import { normalizeFloorPlan } from '../../lib/floorPlanSchema'
+import type { NormalizedRoom } from '../../lib/floorPlanSchema'
 import type { Project } from '../../types/supabase'
 
 type Step1FloorPlanProps = {
@@ -10,17 +12,6 @@ type Step1FloorPlanProps = {
 
 type FloorPlanResponse = Record<string, unknown>
 type UnknownRecord = Record<string, unknown>
-
-type NormalizedRoom = {
-  id: string
-  name: string
-  type: string
-  x: number
-  y: number
-  width: number
-  height: number
-  floor: number
-}
 
 type NormalizedWall = {
   id: string
@@ -56,45 +47,6 @@ function asNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
-}
-
-function normalizeRooms(rooms: unknown): NormalizedRoom[] {
-  if (!Array.isArray(rooms)) return []
-
-  return rooms
-    .map((room, index) => {
-      if (!room || typeof room !== 'object') return null
-      const item = room as UnknownRecord
-
-      const x = asNumber(item.x) ?? asNumber(item.left) ?? asNumber(item.x1)
-      const y = asNumber(item.y) ?? asNumber(item.top) ?? asNumber(item.y1)
-
-      const width =
-        asNumber(item.width) ??
-        ((asNumber(item.x2) !== null && x !== null ? asNumber(item.x2)! - x : null) ??
-          (asNumber(item.right) !== null && x !== null ? asNumber(item.right)! - x : null))
-
-      const height =
-        asNumber(item.height) ??
-        ((asNumber(item.y2) !== null && y !== null ? asNumber(item.y2)! - y : null) ??
-          (asNumber(item.bottom) !== null && y !== null ? asNumber(item.bottom)! - y : null))
-
-      if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) {
-        return null
-      }
-
-      return {
-        id: String(item.id ?? `room-${index}`),
-        name: String(item.name ?? item.label ?? `Room ${index + 1}`),
-        type: String(item.type ?? 'other'),
-        x,
-        y,
-        width,
-        height,
-        floor: asNumber(item.floor) ?? 1,
-      }
-    })
-    .filter((room): room is NormalizedRoom => room !== null)
 }
 
 function normalizeWalls(walls: unknown): NormalizedWall[] {
@@ -242,27 +194,26 @@ function classifyWalls(walls: NormalizedWall[], rooms: NormalizedRoom[]): Normal
 /* ------------------------------------------------------------------ */
 
 function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPlanResponse; projectTitle: string }) {
-  const [selectedFloor, setSelectedFloor] = useState(1)
+  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0)
 
-  const allRooms = normalizeRooms(floorPlanJson.rooms)
+  const floorPlan = useMemo(() => normalizeFloorPlan(floorPlanJson), [floorPlanJson])
+
+  const allRooms = floorPlan?.rooms ?? []
   const allRawWalls = normalizeWalls(floorPlanJson.walls)
   const allDoors = normalizeOpenings(floorPlanJson.doors, 'door')
   const allWindows = normalizeOpenings(floorPlanJson.windows, 'window')
 
-  // Determine available floors
-  const floors = useMemo(() => {
-    const floorSet = new Set(allRooms.map((r) => r.floor))
-    return Array.from(floorSet).sort((a, b) => a - b)
-  }, [allRooms])
+  // Use structured floors from normalizer
+  const floors = floorPlan?.floors ?? []
+  const currentFloor = floors[selectedFloorIndex] ?? floors[0]
 
-  // Filter rooms by selected floor
-  const rooms = useMemo(() => allRooms.filter((r) => r.floor === selectedFloor), [allRooms, selectedFloor])
+  // Get rooms for the selected floor
+  const rooms = useMemo(() => currentFloor?.rooms ?? [], [currentFloor])
   const roomIds = useMemo(() => new Set(rooms.map((r) => r.id)), [rooms])
 
   // Filter walls: keep walls that touch rooms on the selected floor
   const rawWalls = useMemo(() => {
     if (floors.length <= 1) return allRawWalls
-    // Keep walls whose endpoints are within the bounding box of the selected floor's rooms
     const floorBounds = floorPlanBounds(rooms, [])
     const tolerance = Math.max(floorBounds.width, floorBounds.height) * 0.05
     return allRawWalls.filter((wall) => {
@@ -338,18 +289,18 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
       {/* Floor selector */}
       {floors.length > 1 && (
         <div className="flex items-center gap-2 border-b border-warm-border bg-cream px-4 py-2">
-          {floors.map((floor) => (
+          {floors.map((floor, index) => (
             <button
-              key={floor}
+              key={floor.floorNumber}
               type="button"
-              onClick={() => setSelectedFloor(floor)}
+              onClick={() => setSelectedFloorIndex(index)}
               className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-                selectedFloor === floor
+                selectedFloorIndex === index
                   ? 'bg-warm-black text-white'
                   : 'bg-white text-warm-black border border-warm-border hover:border-warm-black'
               }`}
             >
-              Floor {floor}
+              {floor.label}
             </button>
           ))}
         </div>
@@ -618,7 +569,7 @@ function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
             textAnchor="middle"
             dominantBaseline="middle"
           >
-            {projectTitle || 'FLOOR PLAN'}{floors.length > 1 ? ` — Floor ${selectedFloor}` : ''}
+            {projectTitle || 'FLOOR PLAN'}{floors.length > 1 && currentFloor ? ` — ${currentFloor.label}` : ''}
           </text>
           <text
             x={titleBlockX + titleBlockW * 0.3}
@@ -710,7 +661,11 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
       const result = (await response.json()) as FloorPlanResponse
       console.log('generate-floor-plan raw response', result)
 
-      if (!Array.isArray(result.rooms)) {
+      // Accept both structured { building: { floors: [...] } } and flat { rooms: [...] }
+      const hasStructured = result.building && typeof result.building === 'object' && Array.isArray((result.building as UnknownRecord).floors)
+      const hasFlat = Array.isArray(result.rooms)
+
+      if (!hasStructured && !hasFlat) {
         throw new Error('Missing floor plan payload from generator.')
       }
 

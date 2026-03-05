@@ -1,29 +1,6 @@
 import { useState } from 'react'
-
-type FloorPlanRoom = {
-  id: string
-  name: string
-  x: number
-  y: number
-  width: number
-  height: number
-  floor: number
-}
-
-type FloorPlanOpening = {
-  id: string
-  roomId: string
-  wall: 'top' | 'bottom' | 'left' | 'right'
-  position: number
-  width: number
-}
-
-type FloorPlanJson = {
-  rooms: FloorPlanRoom[]
-  walls?: FloorPlanWall[]
-  doors?: FloorPlanOpening[]
-  windows?: FloorPlanOpening[]
-}
+import { normalizeFloorPlan } from '../lib/floorPlanSchema'
+import type { NormalizedRoom } from '../lib/floorPlanSchema'
 
 type FloorPlanWall = {
   id: string
@@ -34,8 +11,16 @@ type FloorPlanWall = {
   thickness?: number
 }
 
+type FloorPlanOpening = {
+  id: string
+  roomId: string
+  wall: 'top' | 'bottom' | 'left' | 'right'
+  position: number
+  width: number
+}
+
 type FloorPlanCanvasProps = {
-  floorPlanJson: FloorPlanJson | null
+  floorPlanJson: Record<string, unknown> | null
 }
 
 function asNumber(value: unknown): number | null {
@@ -51,40 +36,6 @@ function asNumber(value: unknown): number | null {
   }
 
   return null
-}
-
-function normalizeRooms(rooms: unknown): FloorPlanRoom[] {
-  if (!Array.isArray(rooms)) {
-    return []
-  }
-
-  return rooms
-    .map((room, index) => {
-      if (!room || typeof room !== 'object') {
-        return null
-      }
-
-      const item = room as Record<string, unknown>
-      const x = asNumber(item.x)
-      const y = asNumber(item.y)
-      const width = asNumber(item.width)
-      const height = asNumber(item.height)
-
-      if (x === null || y === null || width === null || height === null) {
-        return null
-      }
-
-      return {
-        id: String(item.id ?? `room-${index}`),
-        name: String(item.name ?? `Room ${index + 1}`),
-        x,
-        y,
-        width,
-        height,
-        floor: asNumber(item.floor) ?? 1,
-      }
-    })
-    .filter((room): room is FloorPlanRoom => room !== null)
 }
 
 function normalizeWalls(walls: unknown): FloorPlanWall[] {
@@ -163,7 +114,7 @@ const MAX_WIDTH = 800
 const MAX_HEIGHT = 600
 const PADDING = 24
 
-function getBounds(rooms: FloorPlanRoom[], walls: FloorPlanWall[]) {
+function getBounds(rooms: NormalizedRoom[], walls: FloorPlanWall[]) {
   const wallX = walls.flatMap((wall) => [wall.x1, wall.x2])
   const wallY = walls.flatMap((wall) => [wall.y1, wall.y2])
   const roomMinX = rooms.map((room) => room.x)
@@ -184,7 +135,7 @@ function getBounds(rooms: FloorPlanRoom[], walls: FloorPlanWall[]) {
   }
 }
 
-function openingPoint(room: FloorPlanRoom, opening: FloorPlanOpening) {
+function openingPoint(room: NormalizedRoom, opening: FloorPlanOpening) {
   const start = opening.position
   const end = opening.position + opening.width
 
@@ -205,31 +156,35 @@ function openingPoint(room: FloorPlanRoom, opening: FloorPlanOpening) {
 
 export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   const [zoomLevel, setZoomLevel] = useState(1)
-  const [selectedFloor, setSelectedFloor] = useState(1)
+  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0)
 
   if (!floorPlanJson) {
     return null
   }
 
-  const allRooms = normalizeRooms(floorPlanJson.rooms)
-  const allWalls = normalizeWalls(floorPlanJson.walls)
+  const normalized = normalizeFloorPlan(floorPlanJson)
 
-  if (!allRooms.length && !allWalls.length) {
-    return (
-      <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
-        Floor plan data is missing room geometry.
-      </div>
-    )
+  if (!normalized || normalized.rooms.length === 0) {
+    // No structured data found — check for raw walls-only plans
+    const allWalls = normalizeWalls(floorPlanJson.walls)
+    if (!allWalls.length) {
+      return (
+        <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
+          Floor plan data is missing room geometry.
+        </div>
+      )
+    }
   }
 
+  const floorPlan = normalized!
+  const floors = floorPlan.floors
+  const currentFloor = floors[selectedFloorIndex] ?? floors[0]
+  const rooms = currentFloor.rooms
+
+  const allWalls = normalizeWalls(floorPlanJson.walls)
   const allDoors = normalizeOpenings(floorPlanJson.doors)
   const allWindows = normalizeOpenings(floorPlanJson.windows)
 
-  // Determine available floors
-  const floors = Array.from(new Set(allRooms.map((r) => r.floor))).sort((a, b) => a - b)
-
-  // Filter by selected floor
-  const rooms = allRooms.filter((r) => r.floor === selectedFloor)
   const roomIds = new Set(rooms.map((r) => r.id))
 
   const walls = (() => {
@@ -270,18 +225,18 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
         <div className="flex items-center gap-3">
           {floors.length > 1 && (
             <div className="flex items-center gap-1">
-              {floors.map((floor) => (
+              {floors.map((floor, index) => (
                 <button
-                  key={floor}
+                  key={floor.floorNumber}
                   type="button"
-                  onClick={() => setSelectedFloor(floor)}
+                  onClick={() => setSelectedFloorIndex(index)}
                   className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                    selectedFloor === floor
+                    selectedFloorIndex === index
                       ? 'bg-warm-black text-white'
                       : 'bg-white text-warm-black border border-warm-border hover:border-warm-black'
                   }`}
                 >
-                  Floor {floor}
+                  {floor.label}
                 </button>
               ))}
             </div>
@@ -326,7 +281,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
           viewBox={`0 0 ${viewWidth} ${viewHeight}`}
           preserveAspectRatio="xMidYMid meet"
           role="img"
-          aria-label="Generated 2D floor plan"
+          aria-label={`Floor plan — ${currentFloor.label}`}
         >
         <defs>
           <pattern id="grid" width="4" height="4" patternUnits="userSpaceOnUse">
