@@ -130,6 +130,8 @@ function parseFloorPlanJson(raw: string): FloorPlanJson {
 }
 
 async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<FloorPlanJson> {
+  const promptWithSeed = `${prompt}\n\nUnique seed: ${Math.floor(Math.random() * 9000) + 1000}`
+
   const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -138,10 +140,10 @@ async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<
     },
     body: JSON.stringify({
       model: 'gpt-4o',
-      temperature: 0.2,
+      temperature: 1.0,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: prompt },
+        { role: 'user', content: promptWithSeed },
       ],
     }),
   })

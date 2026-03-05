@@ -221,21 +221,21 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
   const [zoomLevel, setZoomLevel] = useState(1)
   const [selectedFloorIndex, setSelectedFloorIndex] = useState(0)
 
+  const normalized = floorPlanJson ? normalizeFloorPlan(floorPlanJson) : null
+  const floors = normalized?.floors ?? []
+
+  useEffect(() => {
+    if (selectedFloorIndex >= floors.length) setSelectedFloorIndex(0)
+  }, [floors.length, selectedFloorIndex])
+
   if (!floorPlanJson) return null
 
-  const normalized = normalizeFloorPlan(floorPlanJson)
   if (!normalized || normalized.rooms.length === 0) {
     const allWalls = normalizeWalls(floorPlanJson.walls)
     if (!allWalls.length) {
       return <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">Floor plan data is missing room geometry.</div>
     }
   }
-
-  const floors = normalized!.floors
-
-  useEffect(() => {
-    if (selectedFloorIndex >= floors.length) setSelectedFloorIndex(0)
-  }, [floors.length, selectedFloorIndex])
 
   const currentFloor = floors[selectedFloorIndex] ?? floors[0]
   const rooms = currentFloor.rooms
