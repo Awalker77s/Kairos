@@ -48,65 +48,34 @@ type FloorImageSpec = {
   rooms: FloorPlanRoom[]
 }
 
-const SYSTEM_PROMPT = `You are a licensed residential architect with decades of experience designing homes. Given a natural language description of a home or space, you will design a professional floor plan and return ONLY valid JSON — no explanation, no markdown, just raw JSON.
+function createSystemPrompt(seed: number): string {
+  return `You are an architectural floor plan generator. Return ONLY valid JSON, no markdown.
 
-DESIGN PRINCIPLES — think like a real architect:
-- Rooms must use realistic standard dimensions in feet:
-  - Master bedroom: ~14x16 ft, secondary bedrooms: ~12x12 ft, small bedroom: ~10x11 ft
-  - Kitchen: ~10x14 ft, living room: ~16x20 ft, dining room: ~12x14 ft
-  - Full bathroom: ~8x10 ft, half bath: ~5x8 ft, en-suite: ~8x12 ft
-  - Garage (2-car): ~20x22 ft, hallway width: ~4 ft, foyer: ~8x8 ft
-  - Laundry: ~6x8 ft, walk-in closet: ~6x8 ft, pantry: ~4x6 ft
-- All coordinates are in feet. Position (0,0) is the top-left corner. Rooms must be to scale relative to each other.
-- The layout must feel like a real home designed by an architect, not randomly placed boxes:
-  - Entry/foyer should be near the front of the house and lead naturally into common areas.
-  - Common areas (living room, kitchen, dining) should flow together in an open or semi-open plan.
-  - Private areas (bedrooms, bathrooms) should be separated from common areas — typically down a hallway or on a different wing/floor.
-  - The kitchen should be adjacent to the dining area and ideally have access to a back door or patio.
-  - Master bedroom should feel separated from other bedrooms for privacy.
-  - Bathrooms should be accessible from bedrooms or hallways, never requiring walking through another bedroom.
-  - Hallways should connect rooms logically — a person should be able to mentally walk through the house and have every room make sense.
-  - The garage (if present) should connect to the house through a utility area, mudroom, or hallway.
-- Rooms MUST share walls and be flush against each other with no gaps. Adjacent rooms share the exact same wall coordinates.
-- The overall footprint should be a cohesive, compact rectangular or L-shaped form — not scattered separate boxes.
+STRICT LAYOUT RULES:
+- All rooms must tile together with ZERO gaps. Adjacent rooms must share an exact wall edge.
+- The building is a single solid rectangle. Every room must fit within it perfectly.
+- Start from x:0, y:0. The first room starts at the top-left corner.
+- Rooms on the same row must have the same y value and their heights must match.
+- Rooms in the same column must have the same x value and their widths must match.
+- A room's x + width must equal the next room's x on the same row.
+- A room's y + height must equal the next room's y in the same column.
+- Double-check: sum of all room widths in any row must equal building width exactly.
+- Double-check: sum of all room heights in any column must equal building height exactly.
+- Typical building: 14 wide x 10 deep. Vary this per generation.
+- Unique seed: ${seed}
 
-MULTI-STORY RULES:
-- Every room MUST have a "floor" field: 1 for the first floor, 2 for the second floor.
-- If the home description mentions multiple stories, a second floor, or upstairs bedrooms, split rooms across floors appropriately.
-- Typical layout: common areas (kitchen, living, dining, garage, foyer) on floor 1; bedrooms, bathrooms, and private spaces on floor 2.
-- For single-story homes, set "floor": 1 on every room.
-- Each floor should have its own independent coordinate grid starting near (0,0) — do not stack floors vertically in the same coordinate space.
-- Walls, doors, and windows that belong to a room inherit that room's floor.
-
-WALL RULES:
-- Generate explicit walls for every room edge. Walls are line segments (x1,y1) to (x2,y2).
-- Mark each wall as "exterior": true if it is on the outer perimeter of the house, or "exterior": false for interior walls between rooms.
-- Where two rooms share a wall, output only ONE wall segment for that shared edge.
-- All walls must connect cleanly at corners — no gaps or overlaps.
-
-DOOR AND WINDOW RULES:
-- Every room must have at least one door connecting it to an adjacent room or hallway.
-- "position" is the offset in feet from the start of that wall edge of the room. "width" is the opening width.
-- Standard interior door width: 3 ft. Front door: 3.5 ft. Sliding/patio door: 6 ft.
-- Standard window width: 3–4 ft. Place windows on exterior walls only. Bedrooms and living areas should have windows.
-
-JSON SCHEMA:
+Return schema:
 {
-  "rooms": [
-    { "id": "string", "name": "string", "type": "bedroom|bathroom|kitchen|living|dining|office|garage|hallway|closet|laundry|foyer|other", "x": number, "y": number, "width": number, "height": number, "floor": number }
-  ],
-  "walls": [
-    { "id": "string", "x1": number, "y1": number, "x2": number, "y2": number, "exterior": boolean }
-  ],
-  "doors": [
-    { "id": "string", "roomId": "string", "wall": "top|bottom|left|right", "position": number, "width": number }
-  ],
-  "windows": [
-    { "id": "string", "roomId": "string", "wall": "top|bottom|left|right", "position": number, "width": number }
-  ]
+  building: {
+    name, style, totalFloors,
+    floors: [{
+      floorNumber, label,
+      dimensions: { width: number, height: number },
+      rooms: [{ id, name, type, x, y, width, height, connections }]
+    }]
+  }
+}`
 }
-
-Return ONLY the JSON object. No commentary, no code fences.`
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -122,15 +91,94 @@ function parseFloorPlanJson(raw: string): FloorPlanJson {
   const normalized = raw.replace(/```json\s*/gi, '').replace(/```/g, '').trim()
   const parsed = JSON.parse(normalized)
 
-  if (!parsed || !Array.isArray(parsed.rooms)) {
+  const parsedRecord = parsed as Record<string, unknown>
+
+  if (parsedRecord?.building && !parsedRecord.rooms && Array.isArray((parsedRecord.building as Record<string, unknown>).floors)) {
+    const floors = (parsedRecord.building as { floors: Array<{ floorNumber?: number; rooms?: FloorPlanRoom[] }> }).floors
+    const flattenedRooms = floors.flatMap((floor, floorIndex) => {
+      const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : floorIndex + 1
+      const rooms = Array.isArray(floor.rooms) ? floor.rooms : []
+      return rooms.map((room) => ({
+        ...room,
+        floor: typeof room.floor === 'number' ? room.floor : floorNumber,
+      }))
+    })
+    parsedRecord.rooms = flattenedRooms
+  }
+
+  if (!parsed || !Array.isArray(parsedRecord.rooms)) {
     throw new Error('OpenAI response did not include a valid rooms array.')
   }
 
-  return parsed as FloorPlanJson
+  return clampRoomsToFloorDimensions(parsedRecord as FloorPlanJson)
+}
+
+function clampRoomsToFloorDimensions(floorPlan: FloorPlanJson): FloorPlanJson {
+  const floors = floorPlan.building?.floors
+  if (!Array.isArray(floors)) return floorPlan
+
+  let didClamp = false
+
+  const clampedFloors = floors.map((floor, floorIndex) => {
+    const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : floorIndex + 1
+    const maxWidth = floor.dimensions?.width
+    const maxHeight = floor.dimensions?.height
+    if (typeof maxWidth !== 'number' || typeof maxHeight !== 'number' || !Array.isArray(floor.rooms)) {
+      return floor
+    }
+
+    const clampedRooms = floor.rooms.map((room) => {
+      const maxRoomWidth = Math.max(0, maxWidth - room.x)
+      const maxRoomHeight = Math.max(0, maxHeight - room.y)
+      const width = room.width > maxRoomWidth ? maxRoomWidth : room.width
+      const height = room.height > maxRoomHeight ? maxRoomHeight : room.height
+      if (width !== room.width || height !== room.height) {
+        didClamp = true
+        console.warn(
+          `Clamped room "${room.id}" on floor ${floorNumber} to fit dimensions ${maxWidth}x${maxHeight}.`,
+        )
+      }
+      return {
+        ...room,
+        width,
+        height,
+      }
+    })
+
+    return {
+      ...floor,
+      rooms: clampedRooms,
+    }
+  })
+
+  if (!didClamp) return floorPlan
+
+  const roomFloorMap = new Map<string, number>()
+  clampedFloors.forEach((floor, floorIndex) => {
+    const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : floorIndex + 1
+    ;(floor.rooms ?? []).forEach((room) => {
+      roomFloorMap.set(room.id, floorNumber)
+    })
+  })
+
+  return {
+    ...floorPlan,
+    building: {
+      ...floorPlan.building,
+      floors: clampedFloors,
+    },
+    rooms: floorPlan.rooms.map((room) => {
+      const roomFloor = roomFloorMap.get(room.id)
+      if (!roomFloor) return room
+      const floor = clampedFloors.find((item, idx) => (item.floorNumber ?? idx + 1) === roomFloor)
+      const floorRoom = floor?.rooms?.find((item) => item.id === room.id)
+      return floorRoom ? { ...room, width: floorRoom.width, height: floorRoom.height } : room
+    }),
+  }
 }
 
 async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<FloorPlanJson> {
-  const promptWithSeed = `${prompt}\n\nUnique seed: ${Math.floor(Math.random() * 9000) + 1000}`
+  const seed = Math.random()
 
   const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -142,8 +190,8 @@ async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<
       model: 'gpt-4o',
       temperature: 1.0,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: promptWithSeed },
+        { role: 'system', content: createSystemPrompt(seed) },
+        { role: 'user', content: prompt },
       ],
     }),
   })
