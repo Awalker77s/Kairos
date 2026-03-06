@@ -81,10 +81,17 @@ function makeSystemPrompt(seed: number): string {
 
 STYLE + GEOMETRY RULES:
 - Generate practical, realistic dimensions and circulation.
+- Always generate a COMPLETE, realistic residential home layout (no partial sketches).
 - Coordinates are absolute plan coordinates in FEET; origin is top-left.
 - Include every room with floor set to 1 or 2.
 - Every room MUST include: id, name, type, x, y, width, height, floor, material, furniture.
 - material must be uppercase (e.g. HARDWOOD, TILE, CARPET, CONCRETE).
+- material is REQUIRED on every room and must never be null/empty.
+- Include all of these spaces in the home: entry/foyer, living room, kitchen, dining room, at least one hallway, bedrooms, and bathrooms.
+- Layout must be connected like a real home: no floating rooms, no dead-end disconnected spaces.
+- Bathrooms must not be directly adjacent to each other (share no wall).
+- Place living room near the entry/foyer.
+- Place kitchen adjacent to dining room.
 - furniture must be an array of canonical drawing symbols to place in plan.
 - Include complete wall segment geometry in walls[] with wallType = "exterior" or "interior".
 - Every wall segment MUST include measurement string in architectural format like 12'-0\".
@@ -139,6 +146,29 @@ Return this exact schema:
 }`
 }
 
+function normalizeRoomType(type: unknown): string {
+  const normalized = String(type ?? 'other').trim().toLowerCase()
+  return normalized || 'other'
+}
+
+function defaultMaterialForRoomType(roomType: string): string {
+  if (roomType.includes('bath')) return 'TILE'
+  if (roomType.includes('bed')) return 'CARPET'
+  if (roomType.includes('kitchen') || roomType.includes('entry') || roomType.includes('foyer') || roomType.includes('hall')) return 'HARDWOOD'
+  if (roomType.includes('living') || roomType.includes('dining')) return 'HARDWOOD'
+  return 'HARDWOOD'
+}
+
+function normalizeRoomMaterial(material: unknown, roomType: string): string {
+  const normalized = typeof material === 'string' ? material.trim().toUpperCase() : ''
+  return normalized || defaultMaterialForRoomType(roomType)
+}
+
+function normalizeRoomName(name: unknown): string {
+  const normalized = typeof name === 'string' ? name.trim() : ''
+  return normalized ? normalized.toUpperCase() : 'STORAGE'
+}
+
 function coerceNumber(value: unknown, fallback = 0): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
@@ -163,16 +193,17 @@ function parseArchitectJson(rawText: string): FloorPlanJson {
 
     const rooms = roomsRaw.map((roomRaw, roomIndex) => {
       const room = roomRaw as Record<string, unknown>
+      const type = normalizeRoomType(room.type)
       return {
         id: String(room.id ?? `room_${floorNumber}_${roomIndex + 1}`),
-        name: String(room.name ?? `ROOM ${roomIndex + 1}`),
-        type: String(room.type ?? 'other'),
+        name: normalizeRoomName(room.name),
+        type,
         x: coerceNumber(room.x),
         y: coerceNumber(room.y),
         width: Math.max(1, coerceNumber(room.width, 1)),
         height: Math.max(1, coerceNumber(room.height, 1)),
         floor: coerceNumber(room.floor, floorNumber),
-        material: String(room.material ?? 'UNSPECIFIED').toUpperCase(),
+        material: normalizeRoomMaterial(room.material, type),
         furniture: Array.isArray(room.furniture) ? room.furniture.map((item) => String(item)) : [],
       }
     })

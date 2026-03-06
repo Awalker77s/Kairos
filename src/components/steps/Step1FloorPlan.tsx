@@ -59,6 +59,30 @@ function formatFeet(value: number): string {
   return `${wholeFeet}'-${inches}\"`
 }
 
+
+function normalizeRoomType(type: unknown): string {
+  const normalized = String(type ?? 'other').trim().toLowerCase()
+  return normalized || 'other'
+}
+
+function defaultMaterialForRoomType(roomType: string): string {
+  if (roomType.includes('bath')) return 'TILE'
+  if (roomType.includes('bed')) return 'CARPET'
+  if (roomType.includes('kitchen') || roomType.includes('entry') || roomType.includes('foyer') || roomType.includes('hall')) return 'HARDWOOD'
+  if (roomType.includes('living') || roomType.includes('dining')) return 'HARDWOOD'
+  return 'HARDWOOD'
+}
+
+function normalizeRoomMaterial(material: unknown, roomType: string): string {
+  const normalized = typeof material === 'string' ? material.trim().toUpperCase() : ''
+  return normalized || defaultMaterialForRoomType(roomType)
+}
+
+function normalizeRoomName(name: unknown): string {
+  const normalized = typeof name === 'string' ? name.trim() : ''
+  return normalized ? normalized.toUpperCase() : 'STORAGE'
+}
+
 function parseFloorPlan(data: FloorPlanResponse): { floors: number[]; rooms: Room[]; walls: Wall[]; openings: Opening[] } {
   const rooms: Room[] = []
   const walls: Wall[] = []
@@ -73,16 +97,18 @@ function parseFloorPlan(data: FloorPlanResponse): { floors: number[]; rooms: Roo
     const height = asNumber(value.height)
     if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) return
 
+    const roomType = normalizeRoomType(value.type)
+
     rooms.push({
       id: String(value.id ?? `room-${floorNum}-${index}`),
-      name: String(value.name ?? `Room ${index + 1}`),
-      type: String(value.type ?? 'other'),
+      type: roomType,
+      name: normalizeRoomName(value.name),
       x,
       y,
       width,
       height,
       floor: asNumber(value.floor) ?? floorNum,
-      material: String(value.material ?? 'UNSPECIFIED').toUpperCase(),
+      material: normalizeRoomMaterial(value.material, roomType),
       furniture: Array.isArray(value.furniture) ? value.furniture.filter((f): f is string => typeof f === 'string') : [],
     })
   }
@@ -342,7 +368,7 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
             <g key={`label-${room.id}`}>
               <text x={room.x + room.width / 2} y={room.y + room.height / 2 - detailStroke * 8} textAnchor="middle" fontWeight="700" fontSize={detailStroke * 10} fill="#000">{room.name.toUpperCase()}</text>
               <text x={room.x + room.width / 2} y={room.y + room.height / 2 + detailStroke * 2} textAnchor="middle" fontSize={detailStroke * 7} fill="#000">{formatFeet(room.width)} x {formatFeet(room.height)}</text>
-              <text x={room.x + room.width / 2} y={room.y + room.height / 2 + detailStroke * 10} textAnchor="middle" fontSize={detailStroke * 6} fill="#000">{room.material}</text>
+              <text x={room.x + room.width / 2} y={room.y + room.height / 2 + detailStroke * 10} textAnchor="middle" fontSize={detailStroke * 6} fill="#6b7280">{room.material}</text>
             </g>
           ))}
 
