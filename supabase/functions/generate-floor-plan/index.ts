@@ -76,74 +76,8 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function makeSystemPrompt(seed: number): string {
-  return `You are a licensed architect drafting residential floor plans in FEET. Output ONLY strict JSON.
-
-STYLE + GEOMETRY RULES:
-- Generate practical, realistic dimensions and circulation.
-- Always generate a COMPLETE, realistic residential home layout (no partial sketches).
-- Coordinates are absolute plan coordinates in FEET; origin is top-left.
-- Include every room with floor set to 1 or 2.
-- Every room MUST include: id, name, type, x, y, width, height, floor, material, furniture.
-- material must be uppercase (e.g. HARDWOOD, TILE, CARPET, CONCRETE).
-- material is REQUIRED on every room and must never be null/empty.
-- Include all of these spaces in the home: entry/foyer, living room, kitchen, dining room, at least one hallway, bedrooms, and bathrooms.
-- Layout must be connected like a real home: no floating rooms, no dead-end disconnected spaces.
-- Bathrooms must not be directly adjacent to each other (share no wall).
-- Place living room near the entry/foyer.
-- Place kitchen adjacent to dining room.
-- furniture must be an array of canonical drawing symbols to place in plan.
-- Include complete wall segment geometry in walls[] with wallType = "exterior" or "interior".
-- Every wall segment MUST include measurement string in architectural format like 12'-0\".
-- Doors and windows must include x1,y1,x2,y2 and floor and align to walls.
-- If floor 2 exists, include a stair core that vertically aligns with floor 1.
-- Keep room layout buildable and code-plausible.
-- Random seed: ${seed}
-
-Return this exact schema:
-{
-  "building": {
-    "name": "string",
-    "style": "string",
-    "totalFloors": 1,
-    "floors": [
-      {
-        "floorNumber": 1,
-        "label": "Floor 1",
-        "dimensions": { "width": 40, "height": 30 },
-        "rooms": [
-          {
-            "id": "room_1",
-            "name": "KITCHEN",
-            "type": "kitchen",
-            "x": 0,
-            "y": 0,
-            "width": 12,
-            "height": 11,
-            "floor": 1,
-            "material": "HARDWOOD",
-            "furniture": ["counter_l", "island"]
-          }
-        ]
-      }
-    ]
-  },
-  "rooms": [],
-  "walls": [
-    {
-      "id": "w1",
-      "x1": 0,
-      "y1": 0,
-      "x2": 40,
-      "y2": 0,
-      "wallType": "exterior",
-      "measurement": "40'-0\"",
-      "floor": 1
-    }
-  ],
-  "doors": [{ "id": "d1", "x1": 12, "y1": 10, "x2": 15, "y2": 10, "floor": 1 }],
-  "windows": [{ "id": "win1", "x1": 3, "y1": 0, "x2": 8, "y2": 0, "floor": 1 }]
-}`
+function makeSystemPrompt(): string {
+  return `You are a professional architect. Generate a complete, realistic residential floor plan. You MUST include ALL of the following room types — no exceptions: Entry/Foyer, Living Room, Kitchen, Dining Room, at least one Hallway, Bedrooms (as many as requested), and Bathrooms. Every room must have: name, x, y, width, height (in feet), floor (1 or 2), material, and a furniture array. Rooms must be adjacent and connected — no floating rooms. Layout must flow like a real home: Entry → Living Room → Kitchen/Dining → Hallway → Bedrooms/Bathrooms. If the user requests a two story home, Floor 1 must contain Entry, Living Room, Kitchen, Dining Room, and any guest bathroom. Floor 2 must contain all Bedrooms and Bathrooms. Never return a floor plan with only bedrooms and bathrooms.`
 }
 
 function normalizeRoomType(type: unknown): string {
@@ -270,8 +204,6 @@ function parseArchitectJson(rawText: string): FloorPlanJson {
 }
 
 async function generateFloorPlan(openAiApiKey: string, userPrompt: string): Promise<FloorPlanJson> {
-  const seed = Math.round(Math.random() * 1_000_000)
-
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -282,7 +214,7 @@ async function generateFloorPlan(openAiApiKey: string, userPrompt: string): Prom
       model: 'gpt-4o',
       temperature: 0.7,
       messages: [
-        { role: 'system', content: makeSystemPrompt(seed) },
+        { role: 'system', content: makeSystemPrompt() },
         {
           role: 'user',
           content: `${userPrompt}\n\nProduce a professional architectural floor-plan JSON for drafting. Include realistic dimensions and wall measurements for every segment.`,
