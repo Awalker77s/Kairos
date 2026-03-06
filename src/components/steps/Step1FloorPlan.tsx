@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { updateProject } from '../../lib/projects'
 import { supabase } from '../../lib/supabase'
-import { normalizeFloorPlan } from '../../lib/floorPlanSchema'
-import type { NormalizedRoom } from '../../lib/floorPlanSchema'
+import { normalizeFloorPlan as unifyLayout } from '../../lib/floorPlanSchema'
+import type { NormalizedRoom as LayoutChamber } from '../../lib/floorPlanSchema'
 import type { Project } from '../../types/supabase'
 
 type Step1FloorPlanProps = {
@@ -10,158 +10,124 @@ type Step1FloorPlanProps = {
   onProjectChange: (project: Project) => void
 }
 
-type FloorPlanResponse = Record<string, unknown>
-type UnknownRecord = Record<string, unknown>
+type JsonBucket = Record<string, unknown>
+type ApiEnvelope = Record<string, unknown>
+type Side = 'top' | 'bottom' | 'left' | 'right'
 
-type FloorImage = {
-  floor_number: number
-  floor_label: string
-  image_url: string
-  prompt_used: string
+type Segment = {
+  key: string
+  xA: number
+  yA: number
+  xB: number
+  yB: number
+  shell: boolean
 }
 
-type NormalizedWall = {
-  id: string
-  x1: number
-  y1: number
-  x2: number
-  y2: number
-  exterior: boolean
+type GapFeature = {
+  key: string
+  chamberKey?: string
+  side?: Side
+  offset?: number
+  span?: number
+  xA?: number
+  yA?: number
+  xB?: number
+  yB?: number
 }
 
-type WallEdge = 'top' | 'bottom' | 'left' | 'right'
-
-type NormalizedOpening = {
-  id: string
-  roomId?: string
-  wall?: WallEdge
-  position?: number
-  width?: number
-  x1?: number
-  y1?: number
-  x2?: number
-  y2?: number
+type RenderShape = {
+  minX: number
+  minY: number
+  width: number
+  height: number
 }
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
-
-function asNumber(value: unknown): number | null {
+const toFinite = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
-    const parsed = Number(value)
-    return Number.isFinite(parsed) ? parsed : null
+    const numeric = Number(value)
+    return Number.isFinite(numeric) ? numeric : null
   }
   return null
 }
 
-function normalizeWalls(walls: unknown): NormalizedWall[] {
-  if (!Array.isArray(walls)) return []
+const gatherSegments = (input: unknown): Segment[] => {
+  if (!Array.isArray(input)) return []
 
-  return walls
-    .map((wall, index) => {
-      if (!wall || typeof wall !== 'object') return null
-      const item = wall as UnknownRecord
+  return input.reduce<Segment[]>((memo, raw, idx) => {
+    if (!raw || typeof raw !== 'object') return memo
+    const payload = raw as JsonBucket
+    const start = (payload.start ?? payload.from) as JsonBucket | undefined
+    const end = (payload.end ?? payload.to) as JsonBucket | undefined
 
-      const start = (item.start ?? item.from) as UnknownRecord | undefined
-      const end = (item.end ?? item.to) as UnknownRecord | undefined
+    const xA = toFinite(payload.x1) ?? toFinite(start?.x)
+    const yA = toFinite(payload.y1) ?? toFinite(start?.y)
+    const xB = toFinite(payload.x2) ?? toFinite(end?.x)
+    const yB = toFinite(payload.y2) ?? toFinite(end?.y)
 
-      const x1 = asNumber(item.x1) ?? asNumber(start?.x)
-      const y1 = asNumber(item.y1) ?? asNumber(start?.y)
-      const x2 = asNumber(item.x2) ?? asNumber(end?.x)
-      const y2 = asNumber(item.y2) ?? asNumber(end?.y)
+    if (xA === null || yA === null || xB === null || yB === null) return memo
 
-      if (x1 === null || y1 === null || x2 === null || y2 === null) return null
-
-      const exterior = item.exterior === true || item.type === 'exterior'
-
-      return { id: String(item.id ?? `wall-${index}`), x1, y1, x2, y2, exterior }
-    })
-    .filter((wall): wall is NormalizedWall => wall !== null)
-}
-
-function normalizeOpenings(openings: unknown, kind: 'door' | 'window'): NormalizedOpening[] {
-  if (!Array.isArray(openings)) return []
-
-  return openings.reduce<NormalizedOpening[]>((acc, opening, index) => {
-    if (!opening || typeof opening !== 'object') return acc
-    const item = opening as UnknownRecord
-
-    const wall = item.wall
-    const normalizedWall: WallEdge | undefined =
-      wall === 'top' || wall === 'bottom' || wall === 'left' || wall === 'right' ? wall : undefined
-
-    acc.push({
-      id: String(item.id ?? `${kind}-${index}`),
-      roomId: item.roomId ? String(item.roomId) : item.room_id ? String(item.room_id) : undefined,
-      wall: normalizedWall,
-      position: asNumber(item.position) ?? undefined,
-      width: asNumber(item.width) ?? undefined,
-      x1: asNumber(item.x1) ?? undefined,
-      y1: asNumber(item.y1) ?? undefined,
-      x2: asNumber(item.x2) ?? undefined,
-      y2: asNumber(item.y2) ?? undefined,
+    memo.push({
+      key: String(payload.id ?? `segment-${idx}`),
+      xA,
+      yA,
+      xB,
+      yB,
+      shell: payload.exterior === true || payload.type === 'exterior',
     })
 
-    return acc
+    return memo
   }, [])
 }
 
-function openingSegment(opening: NormalizedOpening, roomsById: Map<string, NormalizedRoom>) {
-  if (
-    opening.x1 !== undefined &&
-    opening.y1 !== undefined &&
-    opening.x2 !== undefined &&
-    opening.y2 !== undefined
-  ) {
-    return { x1: opening.x1, y1: opening.y1, x2: opening.x2, y2: opening.y2 }
-  }
+const gatherGaps = (input: unknown, prefix: 'entry' | 'glazing'): GapFeature[] => {
+  if (!Array.isArray(input)) return []
 
-  if (!opening.roomId || !opening.wall || opening.position === undefined || opening.width === undefined) {
-    return null
-  }
+  return input.reduce<GapFeature[]>((memo, raw, idx) => {
+    if (!raw || typeof raw !== 'object') return memo
+    const payload = raw as JsonBucket
+    const side = payload.wall
+    const safeSide: Side | undefined =
+      side === 'top' || side === 'bottom' || side === 'left' || side === 'right' ? side : undefined
 
-  const room = roomsById.get(opening.roomId)
-  if (!room) return null
+    memo.push({
+      key: String(payload.id ?? `${prefix}-${idx}`),
+      chamberKey: payload.roomId ? String(payload.roomId) : payload.room_id ? String(payload.room_id) : undefined,
+      side: safeSide,
+      offset: toFinite(payload.position) ?? undefined,
+      span: toFinite(payload.width) ?? undefined,
+      xA: toFinite(payload.x1) ?? undefined,
+      yA: toFinite(payload.y1) ?? undefined,
+      xB: toFinite(payload.x2) ?? undefined,
+      yB: toFinite(payload.y2) ?? undefined,
+    })
 
-  const start = opening.position
-  const end = opening.position + opening.width
-
-  if (opening.wall === 'top') {
-    return { x1: room.x + start, y1: room.y, x2: room.x + end, y2: room.y }
-  }
-  if (opening.wall === 'bottom') {
-    return { x1: room.x + start, y1: room.y + room.height, x2: room.x + end, y2: room.y + room.height }
-  }
-  if (opening.wall === 'left') {
-    return { x1: room.x, y1: room.y + start, x2: room.x, y2: room.y + end }
-  }
-  return { x1: room.x + room.width, y1: room.y + start, x2: room.x + room.width, y2: room.y + end }
+    return memo
+  }, [])
 }
 
-function floorPlanBounds(rooms: NormalizedRoom[], walls: NormalizedWall[]) {
-  const xs: number[] = []
-  const ys: number[] = []
+const measureEnvelope = (spaces: LayoutChamber[], edges: Segment[]): RenderShape => {
+  const xValues: number[] = []
+  const yValues: number[] = []
 
-  walls.forEach((wall) => {
-    xs.push(wall.x1, wall.x2)
-    ys.push(wall.y1, wall.y2)
+  edges.forEach((edge) => {
+    xValues.push(edge.xA, edge.xB)
+    yValues.push(edge.yA, edge.yB)
   })
 
-  rooms.forEach((room) => {
-    xs.push(room.x, room.x + room.width)
-    ys.push(room.y, room.y + room.height)
+  spaces.forEach((space) => {
+    xValues.push(space.x, space.x + space.width)
+    yValues.push(space.y, space.y + space.height)
   })
 
-  if (!xs.length || !ys.length) {
+  if (!xValues.length || !yValues.length) {
     return { minX: 0, minY: 0, width: 100, height: 100 }
   }
 
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...ys)
-  const maxY = Math.max(...ys)
+  const minX = Math.min(...xValues)
+  const minY = Math.min(...yValues)
+  const maxX = Math.max(...xValues)
+  const maxY = Math.max(...yValues)
 
   return {
     minX,
@@ -171,509 +137,376 @@ function floorPlanBounds(rooms: NormalizedRoom[], walls: NormalizedWall[]) {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  Detect exterior walls                                              */
-/* ------------------------------------------------------------------ */
+const inferShellEdges = (edges: Segment[], spaces: LayoutChamber[]): Segment[] => {
+  if (!spaces.length) return edges
+  const envelope = measureEnvelope(spaces, [])
+  const slack = Math.max(envelope.width, envelope.height) * 0.015
 
-function classifyWalls(walls: NormalizedWall[], rooms: NormalizedRoom[]): NormalizedWall[] {
-  if (rooms.length === 0) return walls
+  return edges.map((edge) => {
+    if (edge.shell) return edge
 
-  const bounds = floorPlanBounds(rooms, [])
-  const tolerance = Math.max(bounds.width, bounds.height) * 0.02
+    const onBorder =
+      (Math.abs(edge.xA - envelope.minX) < slack && Math.abs(edge.xB - envelope.minX) < slack) ||
+      (Math.abs(edge.xA - (envelope.minX + envelope.width)) < slack &&
+        Math.abs(edge.xB - (envelope.minX + envelope.width)) < slack) ||
+      (Math.abs(edge.yA - envelope.minY) < slack && Math.abs(edge.yB - envelope.minY) < slack) ||
+      (Math.abs(edge.yA - (envelope.minY + envelope.height)) < slack &&
+        Math.abs(edge.yB - (envelope.minY + envelope.height)) < slack)
 
-  return walls.map((wall) => {
-    if (wall.exterior) return wall
-
-    const onBoundary =
-      (Math.abs(wall.x1 - bounds.minX) < tolerance && Math.abs(wall.x2 - bounds.minX) < tolerance) ||
-      (Math.abs(wall.x1 - (bounds.minX + bounds.width)) < tolerance &&
-        Math.abs(wall.x2 - (bounds.minX + bounds.width)) < tolerance) ||
-      (Math.abs(wall.y1 - bounds.minY) < tolerance && Math.abs(wall.y2 - bounds.minY) < tolerance) ||
-      (Math.abs(wall.y1 - (bounds.minY + bounds.height)) < tolerance &&
-        Math.abs(wall.y2 - (bounds.minY + bounds.height)) < tolerance)
-
-    return { ...wall, exterior: onBoundary }
+    return { ...edge, shell: onBorder }
   })
 }
 
-/* ------------------------------------------------------------------ */
-/*  SVG Floor Plan Renderer                                           */
-/* ------------------------------------------------------------------ */
+const locateGapSegment = (gap: GapFeature, chamberIndex: Map<string, LayoutChamber>) => {
+  if (
+    gap.xA !== undefined &&
+    gap.yA !== undefined &&
+    gap.xB !== undefined &&
+    gap.yB !== undefined
+  ) {
+    return { xA: gap.xA, yA: gap.yA, xB: gap.xB, yB: gap.yB }
+  }
 
-function FloorPlanSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPlanResponse; projectTitle: string }) {
-  const [selectedFloorIndex, setSelectedFloorIndex] = useState(0)
+  if (!gap.chamberKey || !gap.side || gap.offset === undefined || gap.span === undefined) {
+    return null
+  }
 
-  const floorPlan = useMemo(() => normalizeFloorPlan(floorPlanJson), [floorPlanJson])
+  const chamber = chamberIndex.get(gap.chamberKey)
+  if (!chamber) return null
 
-  const allRooms = floorPlan?.rooms ?? []
-  const allRawWalls = normalizeWalls(floorPlanJson.walls)
-  const allDoors = normalizeOpenings(floorPlanJson.doors, 'door')
-  const allWindows = normalizeOpenings(floorPlanJson.windows, 'window')
+  const lead = gap.offset
+  const tail = gap.offset + gap.span
 
-  // Use structured floors from normalizer
-  const floors = floorPlan?.floors ?? []
+  if (gap.side === 'top') return { xA: chamber.x + lead, yA: chamber.y, xB: chamber.x + tail, yB: chamber.y }
+  if (gap.side === 'bottom') {
+    return { xA: chamber.x + lead, yA: chamber.y + chamber.height, xB: chamber.x + tail, yB: chamber.y + chamber.height }
+  }
+  if (gap.side === 'left') return { xA: chamber.x, yA: chamber.y + lead, xB: chamber.x, yB: chamber.y + tail }
+  return { xA: chamber.x + chamber.width, yA: chamber.y + lead, xB: chamber.x + chamber.width, yB: chamber.y + tail }
+}
+
+const feetLabel = (units: number) => {
+  const rounded = Math.max(0, Math.round(units))
+  return `${rounded}'-0\"`
+}
+
+function BlueprintCanvas({ documentData, headingText }: { documentData: ApiEnvelope; headingText: string }) {
+  const [storyPointer, setStoryPointer] = useState(0)
+
+  const parsedDocument = useMemo(() => unifyLayout(documentData), [documentData])
+  const stories = parsedDocument?.floors ?? []
 
   useEffect(() => {
-    if (selectedFloorIndex >= floors.length) {
-      setSelectedFloorIndex(0)
-    }
-  }, [floors.length, selectedFloorIndex])
-  const currentFloor = floors[selectedFloorIndex] ?? floors[0]
-  const floorImages = (Array.isArray(floorPlanJson.floor_images) ? floorPlanJson.floor_images : []).reduce<FloorImage[]>((acc, item) => {
-    if (!item || typeof item !== 'object') return acc
-    const value = item as UnknownRecord
-    const floorNumber = asNumber(value.floor_number)
-    const floorLabel = typeof value.floor_label === 'string' ? value.floor_label : null
-    const imageUrl = typeof value.image_url === 'string' ? value.image_url : null
-    const promptUsed = typeof value.prompt_used === 'string' ? value.prompt_used : ''
+    if (storyPointer >= stories.length) setStoryPointer(0)
+  }, [stories.length, storyPointer])
 
-    if (floorNumber === null || !floorLabel || !imageUrl) return acc
+  const selectedStory = stories[storyPointer] ?? stories[0]
+  const chambers = selectedStory?.rooms ?? []
+  const chamberLookup = useMemo(() => new Map(chambers.map((space) => [space.id, space])), [chambers])
 
-    acc.push({ floor_number: floorNumber, floor_label: floorLabel, image_url: imageUrl, prompt_used: promptUsed })
-    return acc
-  }, [])
+  const allEdges = gatherSegments(documentData.walls)
+  const allEntries = gatherGaps(documentData.doors, 'entry')
+  const allGlazing = gatherGaps(documentData.windows, 'glazing')
 
-  const currentFloorImage =
-    (currentFloor && floorImages.find((image) => image.floor_number === currentFloor.floorNumber)) ??
-    floorImages[selectedFloorIndex] ??
-    null
-
-  // Get rooms for the selected floor
-  const rooms = useMemo(() => currentFloor?.rooms ?? [], [currentFloor])
-  const roomIds = useMemo(() => new Set(rooms.map((r) => r.id)), [rooms])
-
-  // Filter walls: keep walls that touch rooms on the selected floor
-  const rawWalls = useMemo(() => {
-    if (floors.length <= 1) return allRawWalls
-    const floorBounds = floorPlanBounds(rooms, [])
-    const tolerance = Math.max(floorBounds.width, floorBounds.height) * 0.05
-    return allRawWalls.filter((wall) => {
-      const inX = (x: number) => x >= floorBounds.minX - tolerance && x <= floorBounds.minX + floorBounds.width + tolerance
-      const inY = (y: number) => y >= floorBounds.minY - tolerance && y <= floorBounds.minY + floorBounds.height + tolerance
-      return inX(wall.x1) && inY(wall.y1) && inX(wall.x2) && inY(wall.y2)
+  const scopedEdgeSet = useMemo(() => {
+    if (stories.length <= 1) return allEdges
+    const scope = measureEnvelope(chambers, [])
+    const slack = Math.max(scope.width, scope.height) * 0.05
+    return allEdges.filter((edge) => {
+      const xInside = (x: number) => x >= scope.minX - slack && x <= scope.minX + scope.width + slack
+      const yInside = (y: number) => y >= scope.minY - slack && y <= scope.minY + scope.height + slack
+      return xInside(edge.xA) && xInside(edge.xB) && yInside(edge.yA) && yInside(edge.yB)
     })
-  }, [allRawWalls, rooms, floors.length])
+  }, [allEdges, chambers, stories.length])
 
-  // Filter doors/windows by rooms on selected floor
-  const doors = useMemo(
-    () => allDoors.filter((d) => !d.roomId || roomIds.has(d.roomId)),
-    [allDoors, roomIds],
+  const validChamberKeys = useMemo(() => new Set(chambers.map((space) => space.id)), [chambers])
+  const scopedEntries = useMemo(
+    () => allEntries.filter((item) => !item.chamberKey || validChamberKeys.has(item.chamberKey)),
+    [allEntries, validChamberKeys],
   )
-  const windows = useMemo(
-    () => allWindows.filter((w) => !w.roomId || roomIds.has(w.roomId)),
-    [allWindows, roomIds],
+  const scopedGlazing = useMemo(
+    () => allGlazing.filter((item) => !item.chamberKey || validChamberKeys.has(item.chamberKey)),
+    [allGlazing, validChamberKeys],
   )
 
-  const walls = useMemo(() => classifyWalls(rawWalls, rooms), [rawWalls, rooms])
-
-  const roomsById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms])
-
-  if (!allRooms.length && !allRawWalls.length) {
-    return (
-      <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">
-        Floor plan data is missing room and wall geometry.
-      </div>
-    )
+  if (!chambers.length && !scopedEdgeSet.length) {
+    return <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">No geometry available.</div>
   }
 
-  const bounds = floorPlanBounds(rooms, walls)
-  const padding = Math.max(bounds.width, bounds.height) * 0.15
-  const viewBoxX = bounds.minX - padding
-  const viewBoxY = bounds.minY - padding
-  const viewBoxWidth = bounds.width + padding * 2
-  const viewBoxHeight = bounds.height + padding * 2
+  const plottedEdges = inferShellEdges(scopedEdgeSet, chambers)
+  const envelope = measureEnvelope(chambers, plottedEdges)
 
-  const base = Math.max(bounds.width, bounds.height)
-  const extWallStroke = base * 0.006
-  const intWallStroke = base * 0.0035
-  const doorStroke = base * 0.003
-  const windowStroke = base * 0.0025
-  const labelSize = base * 0.025
-  const gridStep = Math.max(1, Math.round(base / 20))
-  const shadowOffset = base * 0.004
+  const paperMargin = Math.max(envelope.width, envelope.height) * 0.25
+  const chartX = envelope.minX - paperMargin
+  const chartY = envelope.minY - paperMargin
+  const chartWidth = envelope.width + paperMargin * 2
+  const chartHeight = envelope.height + paperMargin * 2
 
-  const titleBlockW = base * 0.28
-  const titleBlockH = base * 0.12
-  const titleBlockX = viewBoxX + viewBoxWidth - padding * 0.6 - titleBlockW
-  const titleBlockY = viewBoxY + viewBoxHeight - padding * 0.6 - titleBlockH
+  const scaleBase = Math.max(envelope.width, envelope.height)
+  const heavyStroke = scaleBase * 0.01
+  const lightStroke = scaleBase * 0.004
+  const noteSize = scaleBase * 0.024
+  const tinyNote = noteSize * 0.72
+  const swingStroke = scaleBase * 0.003
+  const furnitureStroke = scaleBase * 0.0026
+  const dimStroke = scaleBase * 0.0018
 
-  const northArrowX = viewBoxX + viewBoxWidth - padding * 0.7
-  const northArrowY = viewBoxY + padding * 0.7
-  const arrowSize = base * 0.04
+  const outerTop = envelope.minY - paperMargin * 0.45
+  const outerRight = envelope.minX + envelope.width + paperMargin * 0.36
 
-  const gridStartX = Math.floor((viewBoxX) / gridStep) * gridStep
-  const gridStartY = Math.floor((viewBoxY) / gridStep) * gridStep
-  const gridEndX = viewBoxX + viewBoxWidth
-  const gridEndY = viewBoxY + viewBoxHeight
-  const gridLines: { x1: number; y1: number; x2: number; y2: number }[] = []
-  for (let x = gridStartX; x <= gridEndX; x += gridStep) {
-    gridLines.push({ x1: x, y1: viewBoxY, x2: x, y2: viewBoxY + viewBoxHeight })
-  }
-  for (let y = gridStartY; y <= gridEndY; y += gridStep) {
-    gridLines.push({ x1: viewBoxX, y1: y, x2: viewBoxX + viewBoxWidth, y2: y })
-  }
+  const bannerW = chartWidth * 0.42
+  const bannerH = chartHeight * 0.12
+  const bannerX = chartX + (chartWidth - bannerW) / 2
+  const bannerY = chartY + chartHeight - bannerH - paperMargin * 0.12
 
-  const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+  const sheetDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 
   return (
     <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-white shadow-sm">
-      {/* Floor selector */}
-      {floors.length > 1 && (
+      {stories.length > 1 && (
         <div className="flex items-center gap-2 border-b border-warm-border bg-cream px-4 py-2">
-          {floors.map((floor, index) => (
+          {stories.map((story, i) => (
             <button
-              key={floor.floorNumber}
+              key={story.floorNumber}
               type="button"
-              onClick={() => setSelectedFloorIndex(index)}
+              onClick={() => setStoryPointer(i)}
               className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-                selectedFloorIndex === index
+                storyPointer === i
                   ? 'bg-warm-black text-white'
                   : 'bg-white text-warm-black border border-warm-border hover:border-warm-black'
               }`}
             >
-              {floor.label}
+              {story.label}
             </button>
           ))}
         </div>
       )}
+
       <div className="p-3">
-      {currentFloorImage && (
-        <div className="mb-3 overflow-hidden rounded-xl border border-warm-border bg-cream">
-          <img
-            src={currentFloorImage.image_url}
-            alt={`Generated architectural plan for ${currentFloorImage.floor_label}`}
-            className="h-auto w-full"
-          />
-        </div>
-      )}
-      <svg
-        className="h-auto w-full"
-        viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`}
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-        aria-label="Generated floor plan"
-        style={{ fontFamily: "'Arial', 'Helvetica Neue', sans-serif" }}
-      >
-        <defs>
-          <filter id="roomShadow">
-            <feDropShadow dx={shadowOffset} dy={shadowOffset} stdDeviation={shadowOffset * 0.8} floodColor="#00000018" />
-          </filter>
-        </defs>
+        <svg
+          className="h-auto w-full"
+          viewBox={`${chartX} ${chartY} ${chartWidth} ${chartHeight}`}
+          preserveAspectRatio="xMidYMid meet"
+          role="img"
+          aria-label="Architectural blueprint"
+          style={{ fontFamily: "'Arial', 'Helvetica Neue', sans-serif" }}
+        >
+          <rect x={chartX} y={chartY} width={chartWidth} height={chartHeight} fill="#f5f0e8" />
 
-        {/* Background */}
-        <rect x={viewBoxX} y={viewBoxY} width={viewBoxWidth} height={viewBoxHeight} fill="#FAFAFA" />
+          {chambers.map((space) => (
+            <rect
+              key={`space-${space.id}`}
+              x={space.x}
+              y={space.y}
+              width={space.width}
+              height={space.height}
+              fill="none"
+              stroke="#000"
+              strokeWidth={lightStroke * 0.6}
+            />
+          ))}
 
-        {/* Grid */}
-        {gridLines.map((line, i) => (
+          {plottedEdges.map((edge) => (
+            <line
+              key={edge.key}
+              x1={edge.xA}
+              y1={edge.yA}
+              x2={edge.xB}
+              y2={edge.yB}
+              stroke="#000"
+              strokeWidth={edge.shell ? heavyStroke : lightStroke}
+              strokeLinecap="square"
+            />
+          ))}
+
+          {scopedGlazing.map((windowBand) => {
+            const segment = locateGapSegment(windowBand, chamberLookup)
+            if (!segment) return null
+            return (
+              <line
+                key={windowBand.key}
+                x1={segment.xA}
+                y1={segment.yA}
+                x2={segment.xB}
+                y2={segment.yB}
+                stroke="#000"
+                strokeWidth={lightStroke * 1.4}
+              />
+            )
+          })}
+
+          {scopedEntries.map((swingFeature) => {
+            const segment = locateGapSegment(swingFeature, chamberLookup)
+            if (!segment) return null
+
+            const dx = segment.xB - segment.xA
+            const dy = segment.yB - segment.yA
+            const leaf = Math.hypot(dx, dy)
+            if (leaf === 0) return null
+
+            const horizontal = Math.abs(dx) >= Math.abs(dy)
+            const arcTipX = horizontal ? segment.xA : segment.xA + (dx >= 0 ? leaf : -leaf)
+            const arcTipY = horizontal ? segment.yA + (dy >= 0 ? -leaf : leaf) : segment.yA
+            const sweepFlag = horizontal ? (dx > 0 ? 0 : 1) : dy > 0 ? 1 : 0
+
+            return (
+              <g key={swingFeature.key}>
+                <line x1={segment.xA} y1={segment.yA} x2={arcTipX} y2={arcTipY} stroke="#000" strokeWidth={swingStroke} />
+                <path
+                  d={`M ${arcTipX} ${arcTipY} A ${leaf} ${leaf} 0 0 ${sweepFlag} ${segment.xB} ${segment.yB}`}
+                  fill="none"
+                  stroke="#000"
+                  strokeWidth={swingStroke}
+                  strokeDasharray={`${scaleBase * 0.008} ${scaleBase * 0.005}`}
+                />
+              </g>
+            )
+          })}
+
+          {/* Overall dimensions */}
+          <line x1={envelope.minX} y1={outerTop} x2={envelope.minX + envelope.width} y2={outerTop} stroke="#000" strokeWidth={dimStroke} />
+          <line x1={envelope.minX} y1={outerTop - noteSize * 0.35} x2={envelope.minX} y2={envelope.minY} stroke="#000" strokeWidth={dimStroke} />
           <line
-            key={`grid-${i}`}
-            x1={line.x1}
-            y1={line.y1}
-            x2={line.x2}
-            y2={line.y2}
-            stroke="#E0E0E0"
-            strokeWidth={base * 0.0008}
-          />
-        ))}
-
-        {/* Room fills */}
-        {rooms.map((room) => (
-          <rect
-            key={`fill-${room.id}`}
-            x={room.x}
-            y={room.y}
-            width={room.width}
-            height={room.height}
-            fill="#FFFFFF"
-            filter="url(#roomShadow)"
-          />
-        ))}
-
-        {/* Walls */}
-        {walls.map((wall) => (
-          <line
-            key={wall.id}
-            x1={wall.x1}
-            y1={wall.y1}
-            x2={wall.x2}
-            y2={wall.y2}
-            stroke="#1A1A1A"
-            strokeWidth={wall.exterior ? extWallStroke : intWallStroke}
-            strokeLinecap="butt"
-          />
-        ))}
-
-        {/* Window openings — triple-line symbol */}
-        {windows.map((windowItem) => {
-          const seg = openingSegment(windowItem, roomsById)
-          if (!seg) return null
-
-          const dx = seg.x2 - seg.x1
-          const dy = seg.y2 - seg.y1
-          const len = Math.hypot(dx, dy)
-          if (len === 0) return null
-
-          const nx = -dy / len
-          const ny = dx / len
-          const gap = base * 0.006
-
-          return (
-            <g key={windowItem.id}>
-              {/* Erase wall behind window */}
-              <line
-                x1={seg.x1}
-                y1={seg.y1}
-                x2={seg.x2}
-                y2={seg.y2}
-                stroke="#FFFFFF"
-                strokeWidth={extWallStroke * 1.6}
-              />
-              {/* Three parallel lines */}
-              <line
-                x1={seg.x1 + nx * gap}
-                y1={seg.y1 + ny * gap}
-                x2={seg.x2 + nx * gap}
-                y2={seg.y2 + ny * gap}
-                stroke="#1A1A1A"
-                strokeWidth={windowStroke}
-              />
-              <line
-                x1={seg.x1}
-                y1={seg.y1}
-                x2={seg.x2}
-                y2={seg.y2}
-                stroke="#1A1A1A"
-                strokeWidth={windowStroke}
-              />
-              <line
-                x1={seg.x1 - nx * gap}
-                y1={seg.y1 - ny * gap}
-                x2={seg.x2 - nx * gap}
-                y2={seg.y2 - ny * gap}
-                stroke="#1A1A1A"
-                strokeWidth={windowStroke}
-              />
-            </g>
-          )
-        })}
-
-        {/* Door openings — quarter-circle arc swing */}
-        {doors.map((door) => {
-          const seg = openingSegment(door, roomsById)
-          if (!seg) return null
-
-          const dx = seg.x2 - seg.x1
-          const dy = seg.y2 - seg.y1
-          const width = Math.hypot(dx, dy)
-          if (width === 0) return null
-
-          const radius = width
-          const isHorizontal = Math.abs(dx) > Math.abs(dy)
-
-          let arcEndX: number
-          let arcEndY: number
-          let sweep: number
-
-          if (isHorizontal) {
-            arcEndX = seg.x1
-            arcEndY = seg.y1 + (dy >= 0 ? -radius : radius)
-            sweep = dx > 0 ? 0 : 1
-          } else {
-            arcEndX = seg.x1 + (dx >= 0 ? radius : -radius)
-            arcEndY = seg.y1
-            sweep = dy > 0 ? 1 : 0
-          }
-
-          return (
-            <g key={door.id}>
-              {/* Erase wall behind door */}
-              <line
-                x1={seg.x1}
-                y1={seg.y1}
-                x2={seg.x2}
-                y2={seg.y2}
-                stroke="#FFFFFF"
-                strokeWidth={extWallStroke * 1.6}
-              />
-              {/* Door leaf line */}
-              <line
-                x1={seg.x1}
-                y1={seg.y1}
-                x2={arcEndX}
-                y2={arcEndY}
-                stroke="#444444"
-                strokeWidth={doorStroke}
-              />
-              {/* Arc swing */}
-              <path
-                d={`M ${arcEndX} ${arcEndY} A ${radius} ${radius} 0 0 ${sweep} ${seg.x2} ${seg.y2}`}
-                fill="none"
-                stroke="#444444"
-                strokeWidth={doorStroke}
-                strokeDasharray={`${base * 0.008} ${base * 0.004}`}
-              />
-            </g>
-          )
-        })}
-
-        {/* Room labels */}
-        {rooms.map((room) => {
-          const sqft = Math.round(room.width * room.height)
-          const nameText = room.name.toUpperCase()
-          // Scale font to fit within room: use ~60% of room width / char count, capped by room height and global label size
-          const maxByWidth = (room.width * 0.85) / Math.max(nameText.length * 0.6, 1)
-          const maxByHeight = room.height * 0.22
-          const fitLabelSize = Math.min(labelSize, maxByWidth, maxByHeight)
-          const fitSqftSize = fitLabelSize * 0.75
-          return (
-            <g key={`label-${room.id}`}>
-              <text
-                x={room.x + room.width / 2}
-                y={room.y + room.height / 2 - fitSqftSize * 0.4}
-                fontSize={fitLabelSize}
-                fontWeight="600"
-                fill="#333333"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                letterSpacing={base * 0.002}
-              >
-                {nameText}
-              </text>
-              <text
-                x={room.x + room.width / 2}
-                y={room.y + room.height / 2 + fitLabelSize * 0.9}
-                fontSize={fitSqftSize}
-                fontWeight="300"
-                fill="#888888"
-                textAnchor="middle"
-                dominantBaseline="middle"
-              >
-                {sqft} sq ft
-              </text>
-            </g>
-          )
-        })}
-
-        {/* North arrow */}
-        <g>
-          <line
-            x1={northArrowX}
-            y1={northArrowY + arrowSize}
-            x2={northArrowX}
-            y2={northArrowY - arrowSize}
-            stroke="#333333"
-            strokeWidth={base * 0.002}
-          />
-          <polygon
-            points={`${northArrowX},${northArrowY - arrowSize} ${northArrowX - arrowSize * 0.35},${northArrowY - arrowSize * 0.4} ${northArrowX + arrowSize * 0.35},${northArrowY - arrowSize * 0.4}`}
-            fill="#333333"
+            x1={envelope.minX + envelope.width}
+            y1={outerTop - noteSize * 0.35}
+            x2={envelope.minX + envelope.width}
+            y2={envelope.minY}
+            stroke="#000"
+            strokeWidth={dimStroke}
           />
           <text
-            x={northArrowX}
-            y={northArrowY - arrowSize - base * 0.008}
-            fontSize={labelSize * 0.8}
+            x={envelope.minX + envelope.width / 2}
+            y={outerTop - noteSize * 0.2}
+            fontSize={tinyNote}
+            fill="#000"
+            textAnchor="middle"
             fontWeight="700"
-            fill="#333333"
-            textAnchor="middle"
           >
-            N
+            {feetLabel(envelope.width)}
           </text>
-        </g>
 
-        {/* Title block */}
-        <g>
-          <rect
-            x={titleBlockX}
-            y={titleBlockY}
-            width={titleBlockW}
-            height={titleBlockH}
-            fill="#FFFFFF"
-            stroke="#333333"
-            strokeWidth={base * 0.002}
-          />
-          {/* Horizontal divider */}
+          <line x1={outerRight} y1={envelope.minY} x2={outerRight} y2={envelope.minY + envelope.height} stroke="#000" strokeWidth={dimStroke} />
+          <line x1={envelope.minX + envelope.width} y1={envelope.minY} x2={outerRight + noteSize * 0.35} y2={envelope.minY} stroke="#000" strokeWidth={dimStroke} />
           <line
-            x1={titleBlockX}
-            y1={titleBlockY + titleBlockH * 0.45}
-            x2={titleBlockX + titleBlockW}
-            y2={titleBlockY + titleBlockH * 0.45}
-            stroke="#333333"
-            strokeWidth={base * 0.001}
+            x1={envelope.minX + envelope.width}
+            y1={envelope.minY + envelope.height}
+            x2={outerRight + noteSize * 0.35}
+            y2={envelope.minY + envelope.height}
+            stroke="#000"
+            strokeWidth={dimStroke}
           />
           <text
-            x={titleBlockX + titleBlockW / 2}
-            y={titleBlockY + titleBlockH * 0.25}
-            fontSize={labelSize * 0.8}
+            x={outerRight + noteSize * 0.6}
+            y={envelope.minY + envelope.height / 2}
+            fontSize={tinyNote}
+            fill="#000"
             fontWeight="700"
-            fill="#1A1A1A"
+            transform={`rotate(90 ${outerRight + noteSize * 0.6} ${envelope.minY + envelope.height / 2})`}
             textAnchor="middle"
-            dominantBaseline="middle"
           >
-            {projectTitle || 'FLOOR PLAN'}{floors.length > 1 && currentFloor ? ` — ${currentFloor.label}` : ''}
+            {feetLabel(envelope.height)}
           </text>
-          <text
-            x={titleBlockX + titleBlockW * 0.3}
-            y={titleBlockY + titleBlockH * 0.72}
-            fontSize={labelSize * 0.55}
-            fontWeight="400"
-            fill="#666666"
-            textAnchor="middle"
-            dominantBaseline="middle"
-          >
-            {today}
-          </text>
-          <text
-            x={titleBlockX + titleBlockW * 0.7}
-            y={titleBlockY + titleBlockH * 0.72}
-            fontSize={labelSize * 0.55}
-            fontWeight="400"
-            fill="#666666"
-            textAnchor="middle"
-            dominantBaseline="middle"
-          >
-            1 sq = {gridStep} ft
-          </text>
-        </g>
-      </svg>
+
+          {chambers.map((space) => {
+            const areaText = `${Math.round(space.width * space.height)} SQ FT`
+            const finishText = String((space as JsonBucket).floor_material ?? (space as JsonBucket).floorMaterial ?? 'HARDWOOD').toUpperCase()
+            const centerX = space.x + space.width / 2
+            const centerY = space.y + space.height / 2
+            const labelFont = Math.min(noteSize, space.width * 0.12, space.height * 0.22)
+
+            const furnitureW = space.width * 0.36
+            const furnitureH = space.height * 0.2
+            const furnitureX = centerX - furnitureW / 2
+            const furnitureY = centerY + labelFont * 0.95
+
+            return (
+              <g key={`annot-${space.id}`}>
+                <text x={centerX} y={centerY - labelFont * 0.75} fontSize={labelFont} fill="#000" fontWeight="700" textAnchor="middle">
+                  {space.name.toUpperCase()}
+                </text>
+                <text x={centerX} y={centerY + labelFont * 0.05} fontSize={labelFont * 0.62} fill="#000" fontWeight="700" textAnchor="middle">
+                  {areaText}
+                </text>
+                <text x={centerX} y={centerY + labelFont * 0.72} fontSize={labelFont * 0.52} fill="#000" fontWeight="700" textAnchor="middle">
+                  {finishText}
+                </text>
+
+                <rect x={furnitureX} y={furnitureY} width={furnitureW} height={furnitureH} fill="none" stroke="#000" strokeWidth={furnitureStroke} />
+                <line
+                  x1={furnitureX}
+                  y1={furnitureY + furnitureH / 2}
+                  x2={furnitureX + furnitureW}
+                  y2={furnitureY + furnitureH / 2}
+                  stroke="#000"
+                  strokeWidth={furnitureStroke * 0.7}
+                />
+              </g>
+            )
+          })}
+
+          {/* Title block */}
+          <g>
+            <rect x={bannerX} y={bannerY} width={bannerW} height={bannerH} fill="#f5f0e8" stroke="#000" strokeWidth={lightStroke} />
+            <line
+              x1={bannerX}
+              y1={bannerY + bannerH * 0.5}
+              x2={bannerX + bannerW}
+              y2={bannerY + bannerH * 0.5}
+              stroke="#000"
+              strokeWidth={dimStroke}
+            />
+            <text
+              x={bannerX + bannerW / 2}
+              y={bannerY + bannerH * 0.26}
+              fontSize={noteSize * 0.75}
+              fill="#000"
+              fontWeight="700"
+              textAnchor="middle"
+            >
+              {(headingText || 'FLOOR PLAN').toUpperCase()}
+              {selectedStory ? ` - ${selectedStory.label.toUpperCase()}` : ''}
+            </text>
+            <text x={bannerX + bannerW * 0.25} y={bannerY + bannerH * 0.79} fontSize={tinyNote} fill="#000" fontWeight="700" textAnchor="middle">
+              DATE: {sheetDate.toUpperCase()}
+            </text>
+            <text x={bannerX + bannerW * 0.74} y={bannerY + bannerH * 0.79} fontSize={tinyNote} fill="#000" fontWeight="700" textAnchor="middle">
+              SCALE: 1/4\" = 1'-0\" 
+            </text>
+          </g>
+        </svg>
       </div>
     </div>
   )
 }
 
-/* ------------------------------------------------------------------ */
-/*  Main Component                                                    */
-/* ------------------------------------------------------------------ */
+export function Step1FloorPlan({ project: dossier, onProjectChange: emitUpdate }: Step1FloorPlanProps) {
+  const [draftPrompt, setDraftPrompt] = useState(dossier.prompt)
+  const [promptSyncing, setPromptSyncing] = useState(false)
+  const [working, setWorking] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
 
-export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps) {
-  const [promptValue, setPromptValue] = useState(project.prompt)
-  const [isSavingPrompt, setIsSavingPrompt] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const hasBlueprint = Boolean(dossier.floor_plan_json)
 
-  const hasFloorPlan = Boolean(project.floor_plan_json)
+  async function persistPrompt() {
+    if (draftPrompt.trim() === dossier.prompt) return
 
-  async function savePrompt() {
-    if (promptValue.trim() === project.prompt) {
-      return
-    }
-
-    setIsSavingPrompt(true)
-    setError(null)
+    setPromptSyncing(true)
+    setNotice(null)
 
     try {
-      const updated = await updateProject(project.id, { prompt: promptValue.trim() })
-      onProjectChange(updated)
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Unable to save prompt.')
-      setPromptValue(project.prompt)
+      const refreshed = await updateProject(dossier.id, { prompt: draftPrompt.trim() })
+      emitUpdate(refreshed)
+    } catch (fault) {
+      setNotice(fault instanceof Error ? fault.message : 'Unable to save prompt.')
+      setDraftPrompt(dossier.prompt)
     } finally {
-      setIsSavingPrompt(false)
+      setPromptSyncing(false)
     }
   }
 
-  async function handleGenerateFloorPlan() {
-    setIsGenerating(true)
-    setError(null)
+  async function requestBlueprint() {
+    setWorking(true)
+    setNotice(null)
 
     try {
       const {
@@ -682,50 +515,45 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
 
       if (!session) throw new Error('Not authenticated')
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`, {
+      const apiResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-floor-plan`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
-          projectId: project.id,
-          prompt: promptValue,
+          projectId: dossier.id,
+          prompt: draftPrompt,
         }),
       })
 
-      if (!response.ok) {
-        throw new Error('Floor plan generation request failed.')
-      }
+      if (!apiResponse.ok) throw new Error('Floor plan generation request failed.')
 
-      const result = (await response.json()) as FloorPlanResponse
-      console.log('generate-floor-plan raw response', result)
+      const body = (await apiResponse.json()) as ApiEnvelope
+      const validStructured = body.building && typeof body.building === 'object' && Array.isArray((body.building as JsonBucket).floors)
+      const validFlat = Array.isArray(body.rooms)
 
-      // Accept both structured { building: { floors: [...] } } and flat { rooms: [...] }
-      const hasStructured = result.building && typeof result.building === 'object' && Array.isArray((result.building as UnknownRecord).floors)
-      const hasFlat = Array.isArray(result.rooms)
-
-      if (!hasStructured && !hasFlat) {
+      if (!validStructured && !validFlat) {
         throw new Error('Missing floor plan payload from generator.')
       }
 
-      const updated = await updateProject(project.id, {
-        prompt: promptValue.trim(),
-        floor_plan_json: result,
+      const refreshed = await updateProject(dossier.id, {
+        prompt: draftPrompt.trim(),
+        floor_plan_json: body,
         status: 'floor_plan',
       })
 
-      onProjectChange(updated)
-    } catch (generationError) {
-      setError(generationError instanceof Error ? generationError.message : 'Unable to generate floor plan.')
+      emitUpdate(refreshed)
+    } catch (fault) {
+      setNotice(fault instanceof Error ? fault.message : 'Unable to generate floor plan.')
     } finally {
-      setIsGenerating(false)
+      setWorking(false)
     }
   }
 
-  async function proceedToModel() {
-    const updated = await updateProject(project.id, { status: '3d_model' })
-    onProjectChange(updated)
+  async function advanceWorkflow() {
+    const refreshed = await updateProject(dossier.id, { status: '3d_model' })
+    emitUpdate(refreshed)
   }
 
   return (
@@ -736,20 +564,20 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
         </label>
         <textarea
           id="project-prompt"
-          value={promptValue}
-          onChange={(event) => setPromptValue(event.target.value)}
-          onBlur={savePrompt}
+          value={draftPrompt}
+          onChange={(event) => setDraftPrompt(event.target.value)}
+          onBlur={persistPrompt}
           rows={6}
           className="w-full rounded-xl border border-warm-border bg-cream px-4 py-3 text-sm text-warm-black outline-none transition focus:border-gold focus:ring-2 focus:ring-gold/30"
         />
-        <p className="mt-2 text-xs text-warm-stone">{isSavingPrompt ? 'Saving prompt…' : 'Prompt auto-saves on blur.'}</p>
+        <p className="mt-2 text-xs text-warm-stone">{promptSyncing ? 'Saving prompt…' : 'Prompt auto-saves on blur.'}</p>
       </div>
 
       <div className="flex flex-wrap gap-3">
         <button
           type="button"
-          onClick={handleGenerateFloorPlan}
-          disabled={isGenerating}
+          onClick={requestBlueprint}
+          disabled={working}
           className="rounded-full bg-gold px-5 py-2 text-sm font-medium text-warm-black transition hover:bg-gold-dark disabled:cursor-not-allowed disabled:opacity-60"
         >
           Generate Floor Plan
@@ -757,25 +585,25 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
 
         <button
           type="button"
-          onClick={proceedToModel}
-          disabled={!hasFloorPlan}
+          onClick={advanceWorkflow}
+          disabled={!hasBlueprint}
           className="rounded-full border border-warm-border px-5 py-2 text-sm font-medium text-warm-black transition hover:border-gold disabled:cursor-not-allowed disabled:opacity-50"
         >
           Proceed to 3D Model
         </button>
       </div>
 
-      {isGenerating && (
+      {working && (
         <div className="flex items-center gap-3 rounded-xl border border-warm-border bg-cream px-4 py-3 text-sm text-warm-stone">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-gold border-t-transparent" />
           Generating your floor plan&hellip;
         </div>
       )}
 
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {notice && <p className="text-sm text-red-700">{notice}</p>}
 
-      {project.floor_plan_json ? (
-        <FloorPlanSvg floorPlanJson={project.floor_plan_json as FloorPlanResponse} projectTitle={project.title} />
+      {dossier.floor_plan_json ? (
+        <BlueprintCanvas documentData={dossier.floor_plan_json as ApiEnvelope} headingText={dossier.title} />
       ) : (
         <div className="rounded-xl border-2 border-dashed border-warm-border bg-cream p-8 text-center text-warm-stone">
           Your generated floor plan will appear here.
