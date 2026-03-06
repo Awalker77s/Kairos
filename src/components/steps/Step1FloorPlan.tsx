@@ -365,16 +365,26 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
           </g>
 
           {currentRooms.map((room) => (
-            <g key={`label-${room.id}`}>
-              <text x={room.x + room.width / 2} y={room.y + room.height / 2 - detailStroke * 8} textAnchor="middle" fontWeight="700" fontSize={detailStroke * 10} fill="#000">{room.name.toUpperCase()}</text>
-              <text x={room.x + room.width / 2} y={room.y + room.height / 2 + detailStroke * 2} textAnchor="middle" fontSize={detailStroke * 7} fill="#000">{formatFeet(room.width)} x {formatFeet(room.height)}</text>
-              <text x={room.x + room.width / 2} y={room.y + room.height / 2 + detailStroke * 10} textAnchor="middle" fontSize={detailStroke * 6} fill="#6b7280">{room.material}</text>
-            </g>
-          ))}
-
-          {currentRooms.map((room) => (
             <g key={`furniture-${room.id}`}>{drawFurniture(room, detailStroke)}</g>
           ))}
+
+          {currentRooms.map((room) => {
+            const roomCenterX = room.x + room.width / 2
+            const roomBottomY = room.y + room.height
+            const roomPadding = Math.max(detailStroke * 7, Math.min(room.width, room.height) * 0.1)
+            const lineHeight = detailStroke * 8
+            const nameY = roomBottomY - roomPadding - lineHeight * 2
+            const dimensionsY = roomBottomY - roomPadding - lineHeight
+            const materialY = roomBottomY - roomPadding
+
+            return (
+              <g key={`label-${room.id}`}>
+                <text x={roomCenterX} y={nameY} textAnchor="middle" fontWeight="700" fontSize={detailStroke * 10} fill="#000">{room.name.toUpperCase()}</text>
+                <text x={roomCenterX} y={dimensionsY} textAnchor="middle" fontSize={detailStroke * 7} fill="#000">{formatFeet(room.width)} x {formatFeet(room.height)}</text>
+                <text x={roomCenterX} y={materialY} textAnchor="middle" fontSize={detailStroke * 6} fill="#6b7280">{room.material}</text>
+              </g>
+            )
+          })}
 
           {stairRoom && (
             <g>
