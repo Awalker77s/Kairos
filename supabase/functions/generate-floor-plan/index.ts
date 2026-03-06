@@ -9,72 +9,61 @@ const corsHeaders = {
 type FloorPlanRoom = {
   id: string
   name: string
-  type: 'bedroom' | 'bathroom' | 'kitchen' | 'living' | 'dining' | 'office' | 'garage' | 'hallway' | 'other'
+  type: string
   x: number
   y: number
   width: number
   height: number
   floor: number
+  material: string
+  furniture: string[]
+}
+
+type FloorPlanWall = {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  wallType: 'exterior' | 'interior'
+  measurement: string
+  floor: number
+}
+
+type FloorPlanOpening = {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  floor: number
 }
 
 type FloorPlanJson = {
-  rooms: FloorPlanRoom[]
-  walls?: Array<Record<string, unknown>>
-  doors?: Array<Record<string, unknown>>
-  windows?: Array<Record<string, unknown>>
-  building?: {
-    name?: string
-    style?: string
-    floors?: Array<{
-      floorNumber?: number
-      label?: string
-      dimensions?: { width?: number; height?: number }
-      rooms?: FloorPlanRoom[]
+  building: {
+    name: string
+    style: string
+    totalFloors: number
+    floors: Array<{
+      floorNumber: number
+      label: string
+      dimensions: {
+        width: number
+        height: number
+      }
+      rooms: FloorPlanRoom[]
     }>
   }
+  rooms: FloorPlanRoom[]
+  walls: FloorPlanWall[]
+  doors: FloorPlanOpening[]
+  windows: FloorPlanOpening[]
   floor_images?: Array<{
     floor_number: number
     floor_label: string
     image_url: string
     prompt_used: string
   }>
-}
-
-type FloorImageSpec = {
-  floorNumber: number
-  label: string
-  width: number
-  height: number
-  rooms: FloorPlanRoom[]
-}
-
-function createSystemPrompt(seed: number): string {
-  return `You are an architectural floor plan generator. Return ONLY valid JSON, no markdown.
-
-STRICT LAYOUT RULES:
-- All rooms must tile together with ZERO gaps. Adjacent rooms must share an exact wall edge.
-- The building is a single solid rectangle. Every room must fit within it perfectly.
-- Start from x:0, y:0. The first room starts at the top-left corner.
-- Rooms on the same row must have the same y value and their heights must match.
-- Rooms in the same column must have the same x value and their widths must match.
-- A room's x + width must equal the next room's x on the same row.
-- A room's y + height must equal the next room's y in the same column.
-- Double-check: sum of all room widths in any row must equal building width exactly.
-- Double-check: sum of all room heights in any column must equal building height exactly.
-- Typical building: 14 wide x 10 deep. Vary this per generation.
-- Unique seed: ${seed}
-
-Return schema:
-{
-  building: {
-    name, style, totalFloors,
-    floors: [{
-      floorNumber, label,
-      dimensions: { width: number, height: number },
-      rooms: [{ id, name, type, x, y, width, height, connections }]
-    }]
-  }
-}`
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -87,100 +76,172 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function parseFloorPlanJson(raw: string): FloorPlanJson {
-  const normalized = raw.replace(/```json\s*/gi, '').replace(/```/g, '').trim()
-  const parsed = JSON.parse(normalized)
+function makeSystemPrompt(seed: number): string {
+  return `You are a licensed architect drafting residential floor plans in FEET. Output ONLY strict JSON.
 
-  const parsedRecord = parsed as Record<string, unknown>
+STYLE + GEOMETRY RULES:
+- Generate practical, realistic dimensions and circulation.
+- Coordinates are absolute plan coordinates in FEET; origin is top-left.
+- Include every room with floor set to 1 or 2.
+- Every room MUST include: id, name, type, x, y, width, height, floor, material, furniture.
+- material must be uppercase (e.g. HARDWOOD, TILE, CARPET, CONCRETE).
+- furniture must be an array of canonical drawing symbols to place in plan.
+- Include complete wall segment geometry in walls[] with wallType = "exterior" or "interior".
+- Every wall segment MUST include measurement string in architectural format like 12'-0\".
+- Doors and windows must include x1,y1,x2,y2 and floor and align to walls.
+- If floor 2 exists, include a stair core that vertically aligns with floor 1.
+- Keep room layout buildable and code-plausible.
+- Random seed: ${seed}
 
-  if (parsedRecord?.building && !parsedRecord.rooms && Array.isArray((parsedRecord.building as Record<string, unknown>).floors)) {
-    const floors = (parsedRecord.building as { floors: Array<{ floorNumber?: number; rooms?: FloorPlanRoom[] }> }).floors
-    const flattenedRooms = floors.flatMap((floor, floorIndex) => {
-      const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : floorIndex + 1
-      const rooms = Array.isArray(floor.rooms) ? floor.rooms : []
-      return rooms.map((room) => ({
-        ...room,
-        floor: typeof room.floor === 'number' ? room.floor : floorNumber,
-      }))
-    })
-    parsedRecord.rooms = flattenedRooms
-  }
-
-  if (!parsed || !Array.isArray(parsedRecord.rooms)) {
-    throw new Error('OpenAI response did not include a valid rooms array.')
-  }
-
-  return clampRoomsToFloorDimensions(parsedRecord as FloorPlanJson)
+Return this exact schema:
+{
+  "building": {
+    "name": "string",
+    "style": "string",
+    "totalFloors": 1,
+    "floors": [
+      {
+        "floorNumber": 1,
+        "label": "Floor 1",
+        "dimensions": { "width": 40, "height": 30 },
+        "rooms": [
+          {
+            "id": "room_1",
+            "name": "KITCHEN",
+            "type": "kitchen",
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 11,
+            "floor": 1,
+            "material": "HARDWOOD",
+            "furniture": ["counter_l", "island"]
+          }
+        ]
+      }
+    ]
+  },
+  "rooms": [],
+  "walls": [
+    {
+      "id": "w1",
+      "x1": 0,
+      "y1": 0,
+      "x2": 40,
+      "y2": 0,
+      "wallType": "exterior",
+      "measurement": "40'-0\"",
+      "floor": 1
+    }
+  ],
+  "doors": [{ "id": "d1", "x1": 12, "y1": 10, "x2": 15, "y2": 10, "floor": 1 }],
+  "windows": [{ "id": "win1", "x1": 3, "y1": 0, "x2": 8, "y2": 0, "floor": 1 }]
+}`
 }
 
-function clampRoomsToFloorDimensions(floorPlan: FloorPlanJson): FloorPlanJson {
-  const floors = floorPlan.building?.floors
-  if (!Array.isArray(floors)) return floorPlan
+function coerceNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return fallback
+}
 
-  let didClamp = false
+function parseArchitectJson(rawText: string): FloorPlanJson {
+  const cleaned = rawText.replace(/```json\s*/gi, '').replace(/```/g, '').trim()
+  const parsed = JSON.parse(cleaned) as Record<string, unknown>
 
-  const clampedFloors = floors.map((floor, floorIndex) => {
-    const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : floorIndex + 1
-    const maxWidth = floor.dimensions?.width
-    const maxHeight = floor.dimensions?.height
-    if (typeof maxWidth !== 'number' || typeof maxHeight !== 'number' || !Array.isArray(floor.rooms)) {
-      return floor
-    }
+  const building = (parsed.building ?? {}) as Record<string, unknown>
+  const floorsRaw = Array.isArray(building.floors) ? building.floors : []
 
-    const clampedRooms = floor.rooms.map((room) => {
-      const maxRoomWidth = Math.max(0, maxWidth - room.x)
-      const maxRoomHeight = Math.max(0, maxHeight - room.y)
-      const width = room.width > maxRoomWidth ? maxRoomWidth : room.width
-      const height = room.height > maxRoomHeight ? maxRoomHeight : room.height
-      if (width !== room.width || height !== room.height) {
-        didClamp = true
-        console.warn(
-          `Clamped room "${room.id}" on floor ${floorNumber} to fit dimensions ${maxWidth}x${maxHeight}.`,
-        )
-      }
+  const floors = floorsRaw.map((floorRaw, floorIndex) => {
+    const floor = floorRaw as Record<string, unknown>
+    const floorNumber = coerceNumber(floor.floorNumber, floorIndex + 1)
+    const dimensions = (floor.dimensions ?? {}) as Record<string, unknown>
+    const roomsRaw = Array.isArray(floor.rooms) ? floor.rooms : []
+
+    const rooms = roomsRaw.map((roomRaw, roomIndex) => {
+      const room = roomRaw as Record<string, unknown>
       return {
-        ...room,
-        width,
-        height,
+        id: String(room.id ?? `room_${floorNumber}_${roomIndex + 1}`),
+        name: String(room.name ?? `ROOM ${roomIndex + 1}`),
+        type: String(room.type ?? 'other'),
+        x: coerceNumber(room.x),
+        y: coerceNumber(room.y),
+        width: Math.max(1, coerceNumber(room.width, 1)),
+        height: Math.max(1, coerceNumber(room.height, 1)),
+        floor: coerceNumber(room.floor, floorNumber),
+        material: String(room.material ?? 'UNSPECIFIED').toUpperCase(),
+        furniture: Array.isArray(room.furniture) ? room.furniture.map((item) => String(item)) : [],
       }
     })
 
     return {
-      ...floor,
-      rooms: clampedRooms,
+      floorNumber,
+      label: String(floor.label ?? `Floor ${floorNumber}`),
+      dimensions: {
+        width: Math.max(1, coerceNumber(dimensions.width, 30)),
+        height: Math.max(1, coerceNumber(dimensions.height, 24)),
+      },
+      rooms,
     }
   })
 
-  if (!didClamp) return floorPlan
+  const flattenedRooms = floors.flatMap((floor) => floor.rooms.map((room) => ({ ...room, floor: floor.floorNumber })))
 
-  const roomFloorMap = new Map<string, number>()
-  clampedFloors.forEach((floor, floorIndex) => {
-    const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : floorIndex + 1
-    ;(floor.rooms ?? []).forEach((room) => {
-      roomFloorMap.set(room.id, floorNumber)
+  const parseOpenings = (items: unknown): FloorPlanOpening[] => {
+    if (!Array.isArray(items)) return []
+    return items.map((item, index) => {
+      const value = item as Record<string, unknown>
+      return {
+        id: String(value.id ?? `opening_${index + 1}`),
+        x1: coerceNumber(value.x1),
+        y1: coerceNumber(value.y1),
+        x2: coerceNumber(value.x2),
+        y2: coerceNumber(value.y2),
+        floor: coerceNumber(value.floor, 1),
+      }
     })
+  }
+
+  const wallsRaw = Array.isArray(parsed.walls) ? parsed.walls : []
+  const walls: FloorPlanWall[] = wallsRaw.map((item, index) => {
+    const value = item as Record<string, unknown>
+    return {
+      id: String(value.id ?? `wall_${index + 1}`),
+      x1: coerceNumber(value.x1),
+      y1: coerceNumber(value.y1),
+      x2: coerceNumber(value.x2),
+      y2: coerceNumber(value.y2),
+      wallType: value.wallType === 'interior' ? 'interior' : 'exterior',
+      measurement: String(value.measurement ?? '0\'-0"'),
+      floor: coerceNumber(value.floor, 1),
+    }
   })
 
+  if (!floors.length || !flattenedRooms.length) {
+    throw new Error('Model response did not include a valid building/floor/room structure.')
+  }
+
   return {
-    ...floorPlan,
     building: {
-      ...floorPlan.building,
-      floors: clampedFloors,
+      name: String(building.name ?? 'Untitled Project'),
+      style: String(building.style ?? 'Residential'),
+      totalFloors: Math.max(1, coerceNumber(building.totalFloors, floors.length)),
+      floors,
     },
-    rooms: floorPlan.rooms.map((room) => {
-      const roomFloor = roomFloorMap.get(room.id)
-      if (!roomFloor) return room
-      const floor = clampedFloors.find((item, idx) => (item.floorNumber ?? idx + 1) === roomFloor)
-      const floorRoom = floor?.rooms?.find((item) => item.id === room.id)
-      return floorRoom ? { ...room, width: floorRoom.width, height: floorRoom.height } : room
-    }),
+    rooms: flattenedRooms,
+    walls,
+    doors: parseOpenings(parsed.doors),
+    windows: parseOpenings(parsed.windows),
   }
 }
 
-async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<FloorPlanJson> {
-  const seed = Math.random()
+async function generateFloorPlan(openAiApiKey: string, userPrompt: string): Promise<FloorPlanJson> {
+  const seed = Math.round(Math.random() * 1_000_000)
 
-  const openAiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${openAiApiKey}`,
@@ -188,87 +249,33 @@ async function generateFloorPlan(openAiApiKey: string, prompt: string): Promise<
     },
     body: JSON.stringify({
       model: 'gpt-4o',
-      temperature: 1.0,
+      temperature: 0.7,
       messages: [
-        { role: 'system', content: createSystemPrompt(seed) },
-        { role: 'user', content: prompt },
+        { role: 'system', content: makeSystemPrompt(seed) },
+        {
+          role: 'user',
+          content: `${userPrompt}\n\nProduce a professional architectural floor-plan JSON for drafting. Include realistic dimensions and wall measurements for every segment.`,
+        },
       ],
     }),
   })
 
-  if (!openAiResponse.ok) {
-    const errorText = await openAiResponse.text()
-    throw new Error(`OpenAI request failed (${openAiResponse.status}): ${errorText}`)
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`OpenAI floor plan request failed (${response.status}): ${errorText}`)
   }
 
-  const payload = await openAiResponse.json()
-  console.log('generate-floor-plan OpenAI raw payload:', JSON.stringify(payload))
+  const payload = await response.json()
   const content = payload?.choices?.[0]?.message?.content
-
   if (typeof content !== 'string') {
     throw new Error('OpenAI returned an invalid completion payload.')
   }
 
-  return parseFloorPlanJson(content)
-}
-
-function collectFloors(floorPlan: FloorPlanJson): FloorImageSpec[] {
-  const structuredFloors = floorPlan.building?.floors
-  if (Array.isArray(structuredFloors) && structuredFloors.length > 0) {
-    return structuredFloors
-      .map((floor, index) => {
-        const floorNumber = typeof floor.floorNumber === 'number' ? floor.floorNumber : index + 1
-        const label = typeof floor.label === 'string' ? floor.label : `Floor ${floorNumber}`
-        const rooms = Array.isArray(floor.rooms) ? floor.rooms : []
-        const width =
-          typeof floor.dimensions?.width === 'number'
-            ? floor.dimensions.width
-            : Math.max(...rooms.map((room) => room.x + room.width), 0)
-        const height =
-          typeof floor.dimensions?.height === 'number'
-            ? floor.dimensions.height
-            : Math.max(...rooms.map((room) => room.y + room.height), 0)
-
-        return {
-          floorNumber,
-          label,
-          width: Math.max(1, width),
-          height: Math.max(1, height),
-          rooms,
-        }
-      })
-      .sort((a, b) => a.floorNumber - b.floorNumber)
-  }
-
-  const floorMap = new Map<number, FloorPlanRoom[]>()
-  for (const room of floorPlan.rooms) {
-    const existing = floorMap.get(room.floor) ?? []
-    existing.push(room)
-    floorMap.set(room.floor, existing)
-  }
-
-  return Array.from(floorMap.entries())
-    .sort(([a], [b]) => a - b)
-    .map(([floorNumber, rooms]) => ({
-      floorNumber,
-      label: floorNumber === 1 ? 'Ground Floor' : `Floor ${floorNumber}`,
-      width: Math.max(...rooms.map((room) => room.x + room.width), 1),
-      height: Math.max(...rooms.map((room) => room.y + room.height), 1),
-      rooms,
-    }))
-}
-
-function floorRoomSummary(rooms: FloorPlanRoom[]): string {
-  return rooms
-    .map(
-      (room) =>
-        `${room.name} (${room.type}) at x:${room.x}, y:${room.y}, w:${room.width}, h:${room.height}`,
-    )
-    .join('; ')
+  return parseArchitectJson(content)
 }
 
 async function generateFloorImage(openAiApiKey: string, prompt: string): Promise<string> {
-  const openAiResponse = await fetch('https://api.openai.com/v1/images/generations', {
+  const imageResponse = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${openAiApiKey}`,
@@ -281,16 +288,15 @@ async function generateFloorImage(openAiApiKey: string, prompt: string): Promise
     }),
   })
 
-  if (!openAiResponse.ok) {
-    const errorText = await openAiResponse.text()
-    throw new Error(`OpenAI image generation failed (${openAiResponse.status}): ${errorText}`)
+  if (!imageResponse.ok) {
+    const errorText = await imageResponse.text()
+    throw new Error(`OpenAI image generation failed (${imageResponse.status}): ${errorText}`)
   }
 
-  const payload = await openAiResponse.json()
+  const payload = await imageResponse.json()
   const imageBase64 = payload?.data?.[0]?.b64_json
-
   if (typeof imageBase64 !== 'string') {
-    throw new Error('OpenAI did not return image data for floor plan rendering.')
+    throw new Error('Image payload did not include base64 image data.')
   }
 
   return imageBase64
@@ -300,41 +306,28 @@ async function generateFloorImages(
   floorPlan: FloorPlanJson,
   projectId: string,
   userId: string,
-  buildingStyle: string,
   openAiApiKey: string,
   adminClient: ReturnType<typeof createClient>,
 ) {
-  const floors = collectFloors(floorPlan)
-  if (floors.length === 0) return []
+  const images: FloorPlanJson['floor_images'] = []
 
-  const floorImages: FloorPlanJson['floor_images'] = []
-
-  for (let index = 0; index < floors.length; index += 1) {
-    const floor = floors[index]
-    const previousFloor = index > 0 ? floors[index - 1] : null
-
-    const prompt = `Architectural top-down floor plan for ${floor.label} of a ${buildingStyle || 'residential'} building. Rooms: ${floorRoomSummary(
-      floor.rooms,
-    )}.\nThe building footprint is ${floor.width}x${floor.height} meters. Structural walls and staircase must align with the floor below.\nFloor below context: ${
-      previousFloor ? floorRoomSummary(previousFloor.rooms) : 'No floor below. Set baseline footprint and core structure.'
-    }\nClean, technical drawing style, warm tones, consistent scale.`
+  for (const floor of floorPlan.building.floors) {
+    const roomSummary = floor.rooms.map((room) => `${room.name} ${room.width}x${room.height}ft ${room.material}`).join('; ')
+    const prompt = `Hand-drafted architectural blueprint floor plan on cream paper (#f5f0e8), black ink linework, title block, dimension strings, furniture outlines. ${floor.label} of ${floorPlan.building.name}. Rooms: ${roomSummary}.`
 
     const imageBase64 = await generateFloorImage(openAiApiKey, prompt)
-    const imageBytes = Uint8Array.from(atob(imageBase64), (char) => char.charCodeAt(0))
+    const bytes = Uint8Array.from(atob(imageBase64), (char) => char.charCodeAt(0))
     const storagePath = `${userId}/${projectId}/floors/floor-${floor.floorNumber}.png`
 
-    const { error: uploadError } = await adminClient.storage.from('room-renders').upload(storagePath, imageBytes, {
+    const { error: uploadError } = await adminClient.storage.from('room-renders').upload(storagePath, bytes, {
       contentType: 'image/png',
       upsert: true,
     })
-
-    if (uploadError) {
-      throw new Error(uploadError.message)
-    }
+    if (uploadError) throw new Error(uploadError.message)
 
     const { data: publicUrlData } = adminClient.storage.from('room-renders').getPublicUrl(storagePath)
 
-    floorImages.push({
+    images.push({
       floor_number: floor.floorNumber,
       floor_label: floor.label,
       image_url: publicUrlData.publicUrl,
@@ -342,16 +335,12 @@ async function generateFloorImages(
     })
   }
 
-  return floorImages
+  return images
 }
 
 serve(async (request) => {
   if (request.method === 'OPTIONS') {
-    return new Response('ok', {
-      headers: {
-        ...corsHeaders,
-      },
-    })
+    return new Response('ok', { headers: corsHeaders })
   }
 
   if (request.method !== 'POST') {
@@ -365,80 +354,54 @@ serve(async (request) => {
     }
 
     const token = authHeader.replace('Bearer ', '').trim()
-
-    let userId: string
-    try {
-      const parts = token.split('.')
-      if (parts.length !== 3) throw new Error('Malformed JWT')
-
-      // Fix URL-safe base64 to standard base64
-      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
-      const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
-      const payload = JSON.parse(atob(padded))
-
-      userId = payload.sub
-      if (!userId) throw new Error('No subject in token')
-    } catch (e) {
-      console.error('JWT decode error:', e)
+    const parts = token.split('.')
+    if (parts.length !== 3) {
       return jsonResponse({ error: 'Invalid token.' }, 401)
     }
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const openAiApiKey = Deno.env.get('OPENAI_API_KEY')!
-
-    const adminClient = createClient(supabaseUrl, serviceRoleKey)
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+    const payload = JSON.parse(atob(padded)) as Record<string, unknown>
+    const userId = typeof payload.sub === 'string' ? payload.sub : null
+    if (!userId) {
+      return jsonResponse({ error: 'Invalid token payload.' }, 401)
+    }
 
     const body = await request.json().catch(() => null)
     const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
     const projectId = typeof body?.projectId === 'string' ? body.projectId.trim() : ''
-
     if (!prompt || !projectId) {
       return jsonResponse({ error: 'Missing required fields: prompt and projectId.' }, 400)
     }
 
-    let floorPlan: FloorPlanJson
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    const openAiApiKey = Deno.env.get('OPENAI_API_KEY') ?? ''
 
+    if (!supabaseUrl || !serviceRoleKey || !openAiApiKey) {
+      return jsonResponse({ error: 'Server is missing required environment configuration.' }, 500)
+    }
+
+    const adminClient = createClient(supabaseUrl, serviceRoleKey)
+
+    let floorPlan: FloorPlanJson
     try {
       floorPlan = await generateFloorPlan(openAiApiKey, prompt)
-    } catch (firstError) {
-      try {
-        const retryPrompt = `${prompt}\n\nPrevious output was invalid. Error: ${
-          firstError instanceof Error ? firstError.message : 'Unknown parse error'
-        }\nReturn valid raw JSON only.`
-        floorPlan = await generateFloorPlan(openAiApiKey, retryPrompt)
-      } catch (retryError) {
-        return jsonResponse(
-          {
-            error: retryError instanceof Error ? retryError.message : 'Unable to generate floor plan JSON.',
-          },
-          502,
-        )
-      }
+    } catch (error) {
+      const secondAttemptPrompt = `${prompt}\n\nRetry. Previous output was invalid JSON/schema. Return strict JSON only.`
+      floorPlan = await generateFloorPlan(openAiApiKey, secondAttemptPrompt)
     }
 
-    let floorImages: FloorPlanJson['floor_images'] = []
     try {
-      floorImages = await generateFloorImages(
-        floorPlan,
-        projectId,
-        userId,
-        floorPlan.building?.style ?? '',
-        openAiApiKey,
-        adminClient,
-      )
+      floorPlan.floor_images = await generateFloorImages(floorPlan, projectId, userId, openAiApiKey, adminClient)
     } catch (imageError) {
       console.error('Floor image generation failed:', imageError)
-    }
-
-    const floorPlanWithImages: FloorPlanJson = {
-      ...floorPlan,
-      floor_images: floorImages,
+      floorPlan.floor_images = []
     }
 
     const { error: updateError } = await adminClient
       .from('projects')
-      .update({ floor_plan_json: floorPlanWithImages, status: 'floor_plan' })
+      .update({ floor_plan_json: floorPlan, status: 'floor_plan' })
       .eq('id', projectId)
       .eq('user_id', userId)
 
@@ -446,9 +409,9 @@ serve(async (request) => {
       return jsonResponse({ error: updateError.message }, 500)
     }
 
-    return jsonResponse(floorPlanWithImages)
-  } catch (e) {
-    console.error('Unhandled error:', e)
-    return jsonResponse({ error: 'Internal server error' }, 500)
+    return jsonResponse(floorPlan)
+  } catch (error) {
+    console.error('Unhandled generate-floor-plan error:', error)
+    return jsonResponse({ error: 'Internal server error.' }, 500)
   }
 })
