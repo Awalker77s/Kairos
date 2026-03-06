@@ -183,6 +183,10 @@ function roomFurniture(room: NormalizedRoom) {
 const MAX_WIDTH = 800
 const MAX_HEIGHT = 600
 const PADDING = 24
+const PLAN_BG = '#f2f0ea'
+const INK = '#2a2a2a'
+const WALL_FILL = '#ddd9d2'
+const CAD_FONT = "'Arial Narrow', 'Helvetica Neue', Arial, sans-serif"
 
 function getBounds(rooms: NormalizedRoom[], walls: FloorPlanWall[]) {
   const wallX = walls.flatMap((wall) => [wall.x1, wall.x2])
@@ -308,37 +312,72 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
         >
           <defs>
             <marker id="arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 8 4 L 0 8 z" fill="#1a1a1a" />
+              <path d="M 0 0 L 8 4 L 0 8 z" fill={INK} />
             </marker>
             <pattern id="grid" width="1" height="1" patternUnits="userSpaceOnUse">
-              <path d="M 1 0 L 0 0 0 1" fill="none" stroke="#CCCCCC" strokeOpacity="0.4" strokeWidth="0.03" />
+              <path d="M 1 0 L 0 0 0 1" fill="none" stroke="#CFC8BC" strokeOpacity="0.45" strokeWidth="0.03" />
+            </pattern>
+            <pattern id="wallHatch" patternUnits="userSpaceOnUse" width="0.45" height="0.45" patternTransform="rotate(45)">
+              <line x1="0" y1="0" x2="0" y2="0.45" stroke="#bbb5aa" strokeWidth="0.08" />
             </pattern>
           </defs>
 
           <g transform={`translate(${PADDING}, ${PADDING}) scale(${scale}) translate(${-bounds.minX}, ${-bounds.minY})`}>
-            <rect x={bounds.minX - 4} y={bounds.minY - 4} width={bounds.width + 8} height={bounds.height + 8} fill="#F5F0E8" />
+            <rect x={bounds.minX - 4} y={bounds.minY - 4} width={bounds.width + 8} height={bounds.height + 8} fill={PLAN_BG} />
             <rect x={bounds.minX - 4} y={bounds.minY - 4} width={bounds.width + 8} height={bounds.height + 8} fill="url(#grid)" />
 
             {rooms.map((room) => (
-              <rect key={`wall-${room.id}`} x={room.x} y={room.y} width={room.width} height={room.height} fill="none" stroke="#000" strokeWidth="5" vectorEffect="non-scaling-stroke" />
+              <rect key={`room-${room.id}`} x={room.x} y={room.y} width={room.width} height={room.height} fill="#f7f6f2" />
+            ))}
+
+            {rooms.map((room) => (
+              <rect key={`wall-${room.id}`} x={room.x} y={room.y} width={room.width} height={room.height} fill="none" stroke={INK} strokeWidth="5" vectorEffect="non-scaling-stroke" />
             ))}
 
             {walls.map((wall) => (
-              <line
-                key={wall.id}
-                x1={wall.x1}
-                y1={wall.y1}
-                x2={wall.x2}
-                y2={wall.y2}
-                stroke="#1a1a1a"
-                strokeWidth={Math.max(4, (wall.thickness ?? 0.2) * 14)}
-                vectorEffect="non-scaling-stroke"
-              />
+              <g key={wall.id}>
+                <line
+                  x1={wall.x1}
+                  y1={wall.y1}
+                  x2={wall.x2}
+                  y2={wall.y2}
+                  stroke={WALL_FILL}
+                  strokeWidth={Math.max(7, (wall.thickness ?? 0.2) * 18)}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={wall.x1}
+                  y1={wall.y1}
+                  x2={wall.x2}
+                  y2={wall.y2}
+                  stroke="url(#wallHatch)"
+                  strokeWidth={Math.max(7, (wall.thickness ?? 0.2) * 18)}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <line
+                  x1={wall.x1}
+                  y1={wall.y1}
+                  x2={wall.x2}
+                  y2={wall.y2}
+                  stroke={INK}
+                  strokeWidth="2.2"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </g>
             ))}
 
-            <g stroke="#1a1a1a" strokeWidth="1.2" vectorEffect="non-scaling-stroke" fill="none">
+            <g stroke={INK} strokeWidth="1.1" vectorEffect="non-scaling-stroke" fill="none">
               {rooms.map((room) => (
                 <g key={`furniture-${room.id}`}>{roomFurniture(room)}</g>
+              ))}
+            </g>
+
+            <g stroke="#9f9a90" strokeWidth="0.8" strokeDasharray="0.4 0.35" vectorEffect="non-scaling-stroke" fill="none" opacity="0.9">
+              {rooms.map((room) => (
+                <g key={`guide-${room.id}`}>
+                  <line x1={room.x + room.width * 0.12} y1={room.y + room.height / 2} x2={room.x + room.width * 0.88} y2={room.y + room.height / 2} />
+                  <line x1={room.x + room.width / 2} y1={room.y + room.height * 0.12} x2={room.x + room.width / 2} y2={room.y + room.height * 0.88} />
+                </g>
               ))}
             </g>
 
@@ -352,7 +391,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                   key={door.id}
                   d={`M ${segment.x1} ${segment.y1} A ${door.width} ${door.width} 0 0 ${arcSweep} ${segment.x2} ${segment.y2}`}
                   fill="none"
-                  stroke="#1a1a1a"
+                  stroke={INK}
                   strokeWidth="1.5"
                   vectorEffect="non-scaling-stroke"
                 />
@@ -368,7 +407,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                 const y = segment.y1
                 const windowOffset = windowItem.wall === 'top' ? -offset : offset
                 return (
-                  <g key={windowItem.id} stroke="#1a1a1a" strokeWidth="1" vectorEffect="non-scaling-stroke">
+                  <g key={windowItem.id} stroke={INK} strokeWidth="1" vectorEffect="non-scaling-stroke">
                     <line x1={segment.x1} y1={y - windowOffset} x2={segment.x2} y2={y - windowOffset} />
                     <line x1={segment.x1} y1={y + windowOffset} x2={segment.x2} y2={y + windowOffset} />
                   </g>
@@ -377,7 +416,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
               const x = segment.x1
               const windowOffset = windowItem.wall === 'left' ? -offset : offset
               return (
-                <g key={windowItem.id} stroke="#1a1a1a" strokeWidth="1" vectorEffect="non-scaling-stroke">
+                <g key={windowItem.id} stroke={INK} strokeWidth="1" vectorEffect="non-scaling-stroke">
                   <line x1={x - windowOffset} y1={segment.y1} x2={x - windowOffset} y2={segment.y2} />
                   <line x1={x + windowOffset} y1={segment.y1} x2={x + windowOffset} y2={segment.y2} />
                 </g>
@@ -388,7 +427,7 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
               const stepCount = 7
               const spacing = stair.height / stepCount
               return (
-                <g key={stair.id} stroke="#1a1a1a" fill="none" vectorEffect="non-scaling-stroke">
+                <g key={stair.id} stroke={INK} fill="none" vectorEffect="non-scaling-stroke">
                   <rect x={stair.x} y={stair.y} width={stair.width} height={stair.height} strokeWidth="1.2" />
                   {Array.from({ length: stepCount }, (_, index) => (
                     <line
@@ -408,26 +447,30 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                     strokeWidth="1.2"
                     markerEnd="url(#arrow)"
                   />
-                  <text x={stair.x + stair.width + 0.3} y={stair.y + stair.height / 2} fill="#1a1a1a" fontSize="0.7" fontFamily="'Courier New', monospace">
+                  <text x={stair.x + stair.width + 0.3} y={stair.y + stair.height / 2} fill={INK} fontSize="0.7" fontFamily={CAD_FONT}>
                     {stair.direction.toUpperCase()}
                   </text>
                 </g>
               )
             })}
 
-            <g stroke="#1a1a1a" fill="none" vectorEffect="non-scaling-stroke">
+            <g stroke={INK} fill="none" vectorEffect="non-scaling-stroke">
               <line x1={bounds.minX} y1={bounds.minY - 2} x2={bounds.minX + bounds.width} y2={bounds.minY - 2} strokeWidth="1" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
               <line x1={bounds.minX - 2} y1={bounds.minY} x2={bounds.minX - 2} y2={bounds.minY + bounds.height} strokeWidth="1" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
-              <text x={bounds.minX + bounds.width / 2} y={bounds.minY - 2.4} textAnchor="middle" fill="#1a1a1a" fontSize="0.8" fontFamily="'Courier New', monospace">
+              <line x1={bounds.minX} y1={bounds.minY - 1.2} x2={bounds.minX} y2={bounds.minY - 2.7} strokeWidth="0.8" />
+              <line x1={bounds.minX + bounds.width} y1={bounds.minY - 1.2} x2={bounds.minX + bounds.width} y2={bounds.minY - 2.7} strokeWidth="0.8" />
+              <line x1={bounds.minX - 1.2} y1={bounds.minY} x2={bounds.minX - 2.7} y2={bounds.minY} strokeWidth="0.8" />
+              <line x1={bounds.minX - 1.2} y1={bounds.minY + bounds.height} x2={bounds.minX - 2.7} y2={bounds.minY + bounds.height} strokeWidth="0.8" />
+              <text x={bounds.minX + bounds.width / 2} y={bounds.minY - 2.4} textAnchor="middle" fill={INK} fontSize="0.8" fontFamily={CAD_FONT}>
                 {formatFeet(bounds.width)}
               </text>
               <text
                 x={bounds.minX - 2.5}
                 y={bounds.minY + bounds.height / 2}
                 textAnchor="middle"
-                fill="#1a1a1a"
+                fill={INK}
                 fontSize="0.8"
-                fontFamily="'Courier New', monospace"
+                fontFamily={CAD_FONT}
                 transform={`rotate(-90 ${bounds.minX - 2.5} ${bounds.minY + bounds.height / 2})`}
               >
                 {formatFeet(bounds.height)}
@@ -441,10 +484,10 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                   <text
                     x={room.x + room.width / 2}
                     y={room.y + room.height / 2 - labelSize * 0.9}
-                    fill="#1a1a1a"
+                    fill={INK}
                     fontSize={labelSize}
                     fontWeight="700"
-                    fontFamily="'Courier New', monospace"
+                    fontFamily={CAD_FONT}
                     letterSpacing="0.04em"
                     textAnchor="middle"
                     dominantBaseline="middle"
@@ -454,9 +497,9 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                   <text
                     x={room.x + room.width / 2}
                     y={room.y + room.height / 2 + labelSize * 0.2}
-                    fill="#1a1a1a"
+                    fill={INK}
                     fontSize={labelSize * 0.72}
-                    fontFamily="'Courier New', monospace"
+                    fontFamily={CAD_FONT}
                     textAnchor="middle"
                     dominantBaseline="middle"
                   >
@@ -465,9 +508,9 @@ export function FloorPlanCanvas({ floorPlanJson }: FloorPlanCanvasProps) {
                   <text
                     x={room.x + room.width / 2}
                     y={room.y + room.height / 2 + labelSize * 1.2}
-                    fill="#1a1a1a"
+                    fill={INK}
                     fontSize={labelSize * 0.65}
-                    fontFamily="'Courier New', monospace"
+                    fontFamily={CAD_FONT}
                     textAnchor="middle"
                     dominantBaseline="middle"
                   >
