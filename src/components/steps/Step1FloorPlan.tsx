@@ -117,7 +117,7 @@ function warnOnOverlappingRooms(rooms: Room[]) {
   })
 }
 
-function parseFloorPlan(data: FloorPlanResponse): { floors: number[]; rooms: Room[]; walls: Wall[]; openings: Opening[] } {
+function parseFloorPlan(data: FloorPlanResponse): { floors: number[]; storyLabel: string; rooms: Room[]; walls: Wall[]; openings: Opening[] } {
   const rooms: Room[] = []
   const walls: Wall[] = []
   const openings: Opening[] = []
@@ -204,7 +204,8 @@ function parseFloorPlan(data: FloorPlanResponse): { floors: number[]; rooms: Roo
   if (Array.isArray(data.windows)) data.windows.forEach((item, index) => addOpening(item, 'window', index))
 
   const floors = Array.from(new Set(rooms.map((room) => room.floor))).sort((a, b) => a - b)
-  return { floors: floors.length ? floors : [1], rooms, walls, openings }
+  const storyLabel = floors.length > 1 ? 'TWO STORY HOME' : 'SINGLE STORY HOME'
+  return { floors: floors.length ? floors : [1], storyLabel, rooms, walls, openings }
 }
 
 function drawFurniture(room: Room, strokeWidth: number) {
@@ -492,6 +493,7 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
             <line x1={minX + width * 0.58} y1={maxY + dimOffset * 0.8} x2={minX + width * 0.58} y2={maxY + dimOffset * 0.8 + titleBlockH * 0.7} stroke="#000" strokeWidth={detailStroke} />
             <line x1={minX + width * 0.78} y1={maxY + dimOffset * 0.8} x2={minX + width * 0.78} y2={maxY + dimOffset * 0.8 + titleBlockH * 0.7} stroke="#000" strokeWidth={detailStroke} />
             <text x={minX + width * 0.02} y={maxY + dimOffset * 1.15} fontSize={detailStroke * 8} fontWeight="700">{(projectTitle || 'PROJECT').toUpperCase()} - FLOOR {selectedFloor}</text>
+            <text x={minX + width * 0.6} y={maxY + dimOffset * 1.55} fontSize={detailStroke * 6}>{parsed.storyLabel}</text>
             <text x={minX + width * 0.02} y={maxY + dimOffset * 1.55} fontSize={detailStroke * 6}>SCALE: 1/4\" = 1'-0\"</text>
             <text x={minX + width * 0.6} y={maxY + dimOffset * 1.15} fontSize={detailStroke * 6}>DATE: {new Date().toLocaleDateString('en-US')}</text>
             <line x1={minX + width * 0.88} y1={maxY + dimOffset * 1.6} x2={minX + width * 0.88} y2={maxY + dimOffset * 0.95} stroke="#000" strokeWidth={detailStroke} />
