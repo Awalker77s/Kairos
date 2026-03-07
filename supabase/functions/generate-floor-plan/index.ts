@@ -77,7 +77,203 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function makeSystemPrompt(): string {
-  return `You are a professional architect. Generate a complete, realistic residential floor plan. You MUST include ALL of the following room types — no exceptions: Entry/Foyer, Living Room, Kitchen, Dining Room, at least one Hallway, Bedrooms (as many as requested), and Bathrooms. Every room must have: name, x, y, width, height (in feet), floor (1 or 2), material, and a furniture array. Rooms must be adjacent and connected — no floating rooms. Layout must flow like a real home: Entry → Living Room → Kitchen/Dining → Hallway → Bedrooms/Bathrooms. If the user requests a multi-story home (2+ floors), Floor 1 must ONLY contain living areas, kitchen, dining, entry, garage, and guest bathroom. Bedrooms must be on Floor 2 only and must NEVER appear on Floor 1. Floor 2 must contain all bedrooms and non-guest bathrooms. Never return a floor plan with only bedrooms and bathrooms.`
+  return `You are a professional architect. Generate a complete, realistic residential floor plan JSON.
+
+HARD GEOMETRY REQUIREMENTS (MANDATORY):
+- Rooms must tile together exactly like puzzle pieces.
+- Every room edge that is intended to connect must be perfectly flush with the neighboring room edge.
+- No floating rooms, no gaps, no overlaps, no misaligned corners.
+- The overall footprint per floor must be either:
+  1) a clean rectangle, OR
+  2) a simple L-shape (a rectangle with exactly one rectangular corner notch).
+- Do NOT produce stair-stepped / jagged outer boundaries.
+- Use consistent axis-aligned coordinates and dimensions in feet.
+
+PROGRAM REQUIREMENTS (MANDATORY):
+- Every room must include: name, type, x, y, width, height, floor, material, furniture.
+- Include realistic circulation so layout flows like a real home:
+  Entry → Living Room → Kitchen/Dining → Hallway → Bedrooms/Bathrooms.
+- Never return a plan containing only bedrooms and bathrooms.
+
+SPECIAL CASE (STRICT):
+- If the request is for a 2 bed / 2 bath SINGLE STORY home, you MUST include ALL of these rooms, with no exceptions:
+  Entry, Living Room, Kitchen, Dining Room, Hallway, Master Bedroom, Ensuite Bathroom, Second Bedroom, Guest Bathroom, Laundry Room.
+
+MULTI-STORY RULE:
+- If user explicitly requests multi-story (2+ floors):
+  Floor 1 must only contain living areas, kitchen, dining, entry, garage, and guest bathroom.
+  Bedrooms must be on Floor 2 only.
+  Floor 2 must contain bedrooms and non-guest bathrooms.`
+}
+
+const GRID_SCALE = 2
+const GRID_EPSILON = 0.01
+
+function toGrid(value: number): number {
+  const scaled = value * GRID_SCALE
+  const rounded = Math.round(scaled)
+  if (Math.abs(scaled - rounded) > GRID_EPSILON) {
+    throw new Error(`Room geometry must snap to ${1 / GRID_SCALE}ft increments.`)
+  }
+  return rounded
+}
+
+function roomsShareWall(a: FloorPlanRoom, b: FloorPlanRoom): boolean {
+  const aRight = a.x + a.width
+  const bRight = b.x + b.width
+  const aBottom = a.y + a.height
+  const bBottom = b.y + b.height
+
+  const verticalFlush = Math.abs(aRight - b.x) < GRID_EPSILON || Math.abs(bRight - a.x) < GRID_EPSILON
+  if (verticalFlush) {
+    const overlap = Math.min(aBottom, bBottom) - Math.max(a.y, b.y)
+    if (overlap > GRID_EPSILON) return true
+  }
+
+  const horizontalFlush = Math.abs(aBottom - b.y) < GRID_EPSILON || Math.abs(bBottom - a.y) < GRID_EPSILON
+  if (horizontalFlush) {
+    const overlap = Math.min(aRight, bRight) - Math.max(a.x, b.x)
+    if (overlap > GRID_EPSILON) return true
+  }
+
+  return false
+}
+
+function validateTiledFootprint(rooms: FloorPlanRoom[], floorNumber: number): void {
+  const occupancy = new Map<string, string>()
+  let minGX = Number.POSITIVE_INFINITY
+  let minGY = Number.POSITIVE_INFINITY
+  let maxGX = Number.NEGATIVE_INFINITY
+  let maxGY = Number.NEGATIVE_INFINITY
+
+  for (const room of rooms) {
+    const gx1 = toGrid(room.x)
+    const gy1 = toGrid(room.y)
+    const gx2 = toGrid(room.x + room.width)
+    const gy2 = toGrid(room.y + room.height)
+    if (gx2 <= gx1 || gy2 <= gy1) throw new Error(`Floor ${floorNumber} has an invalid room size.`)
+
+    minGX = Math.min(minGX, gx1)
+    minGY = Math.min(minGY, gy1)
+    maxGX = Math.max(maxGX, gx2)
+    maxGY = Math.max(maxGY, gy2)
+
+    for (let x = gx1; x < gx2; x += 1) {
+      for (let y = gy1; y < gy2; y += 1) {
+        const key = `${x},${y}`
+        if (occupancy.has(key)) {
+          throw new Error(`Floor ${floorNumber} has overlapping rooms (${room.name}).`)
+        }
+        occupancy.set(key, room.id)
+      }
+    }
+  }
+
+  const holeCells: string[] = []
+  for (let x = minGX; x < maxGX; x += 1) {
+    for (let y = minGY; y < maxGY; y += 1) {
+      const key = `${x},${y}`
+      if (!occupancy.has(key)) holeCells.push(key)
+    }
+  }
+
+  if (holeCells.length > 0) {
+    const xs = holeCells.map((cell) => Number(cell.split(',')[0]))
+    const ys = holeCells.map((cell) => Number(cell.split(',')[1]))
+    const holeMinX = Math.min(...xs)
+    const holeMaxX = Math.max(...xs) + 1
+    const holeMinY = Math.min(...ys)
+    const holeMaxY = Math.max(...ys) + 1
+    const holeArea = (holeMaxX - holeMinX) * (holeMaxY - holeMinY)
+    if (holeArea !== holeCells.length) {
+      throw new Error(`Floor ${floorNumber} footprint must be a clean rectangle or simple L-shape.`)
+    }
+
+    const touchesLeft = holeMinX === minGX
+    const touchesRight = holeMaxX === maxGX
+    const touchesTop = holeMinY === minGY
+    const touchesBottom = holeMaxY === maxGY
+    const isCornerNotch =
+      (touchesLeft && touchesTop) ||
+      (touchesTop && touchesRight) ||
+      (touchesRight && touchesBottom) ||
+      (touchesBottom && touchesLeft)
+
+    if (!isCornerNotch) {
+      throw new Error(`Floor ${floorNumber} footprint must be a clean rectangle or simple L-shape.`)
+    }
+  }
+
+  if (rooms.length > 1) {
+    const connected = new Set<string>()
+    connected.add(rooms[0].id)
+    let expanded = true
+    while (expanded) {
+      expanded = false
+      for (const room of rooms) {
+        if (connected.has(room.id)) continue
+        if (rooms.some((other) => connected.has(other.id) && roomsShareWall(room, other))) {
+          connected.add(room.id)
+          expanded = true
+        }
+      }
+    }
+    if (connected.size !== rooms.length) {
+      throw new Error(`Floor ${floorNumber} has disconnected rooms. Rooms must share flush walls.`)
+    }
+  }
+}
+
+function normalizeLabel(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function isStrictTwoBedTwoBathSingleStoryPrompt(userPrompt: string): boolean {
+  const normalized = userPrompt.toLowerCase()
+  const asksTwoBed = /\b2\s*bed\b|\btwo\s*bed\b|\b2\s*bedroom\b|\btwo\s*bedroom\b/.test(normalized)
+  const asksTwoBath = /\b2\s*bath\b|\btwo\s*bath\b|\b2\s*bathroom\b|\btwo\s*bathroom\b/.test(normalized)
+  const asksSingleStory = /single\s*story|one\s*story|single\s*floor/.test(normalized)
+  return asksTwoBed && asksTwoBath && asksSingleStory
+}
+
+function validateRequiredRoomsForSingleStory(floorPlan: FloorPlanJson): void {
+  const required = [
+    'entry',
+    'livingroom',
+    'kitchen',
+    'diningroom',
+    'hallway',
+    'masterbedroom',
+    'ensuitebathroom',
+    'secondbedroom',
+    'guestbathroom',
+    'laundryroom',
+  ]
+
+  const labels = new Set(
+    floorPlan.rooms.flatMap((room) => [normalizeLabel(room.name), normalizeLabel(room.type)]),
+  )
+
+  const missing = required.filter((token) => !labels.has(token))
+  if (missing.length) {
+    throw new Error(`Missing required rooms for 2 bed / 2 bath single story home: ${missing.join(', ')}`)
+  }
+}
+
+function validateFloorPlan(floorPlan: FloorPlanJson, userPrompt: string): void {
+  for (const floor of floorPlan.building.floors) {
+    validateTiledFootprint(floor.rooms, floor.floorNumber)
+  }
+
+  const usedFloors = new Set(floorPlan.rooms.map((room) => room.floor))
+  floorPlan.building.totalFloors = Math.max(1, usedFloors.size)
+
+  if (isStrictTwoBedTwoBathSingleStoryPrompt(userPrompt)) {
+    if (usedFloors.size !== 1 || !usedFloors.has(1)) {
+      throw new Error('2 bed / 2 bath single-story request must place all rooms on floor 1.')
+    }
+    validateRequiredRoomsForSingleStory(floorPlan)
+  }
 }
 
 function normalizeRoomType(type: unknown): string {
@@ -234,7 +430,9 @@ async function generateFloorPlan(openAiApiKey: string, userPrompt: string): Prom
     throw new Error('OpenAI returned an invalid completion payload.')
   }
 
-  return parseArchitectJson(content)
+  const floorPlan = parseArchitectJson(content)
+  validateFloorPlan(floorPlan, userPrompt)
+  return floorPlan
 }
 
 async function generateFloorImage(openAiApiKey: string, prompt: string): Promise<string> {
