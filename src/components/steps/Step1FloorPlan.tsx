@@ -83,6 +83,40 @@ function normalizeRoomName(name: unknown): string {
   return normalized ? normalized.toUpperCase() : 'STORAGE'
 }
 
+function getRoomIntersectionArea(a: Room, b: Room): number {
+  const overlapWidth = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+  const overlapHeight = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+  if (overlapWidth <= 0 || overlapHeight <= 0) return 0
+  return overlapWidth * overlapHeight
+}
+
+function warnOnOverlappingRooms(rooms: Room[]) {
+  const roomsByFloor = new Map<number, Room[]>()
+  rooms.forEach((room) => {
+    const floorRooms = roomsByFloor.get(room.floor) ?? []
+    floorRooms.push(room)
+    roomsByFloor.set(room.floor, floorRooms)
+  })
+
+  roomsByFloor.forEach((floorRooms, floor) => {
+    for (let i = 0; i < floorRooms.length; i += 1) {
+      for (let j = i + 1; j < floorRooms.length; j += 1) {
+        const first = floorRooms[i]
+        const second = floorRooms[j]
+        const intersectionArea = getRoomIntersectionArea(first, second)
+        if (intersectionArea > 0) {
+          console.warn('[floor-plan] Overlapping rooms detected', {
+            floor,
+            roomA: { id: first.id, name: first.name, x: first.x, y: first.y, width: first.width, height: first.height },
+            roomB: { id: second.id, name: second.name, x: second.x, y: second.y, width: second.width, height: second.height },
+            intersectionArea,
+          })
+        }
+      }
+    }
+  })
+}
+
 function parseFloorPlan(data: FloorPlanResponse): { floors: number[]; rooms: Room[]; walls: Wall[]; openings: Opening[] } {
   const rooms: Room[] = []
   const walls: Wall[] = []
@@ -244,31 +278,85 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
     return <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">No drawable floor plan geometry found.</div>
   }
 
-  const minX = Math.min(...currentRooms.map((room) => room.x))
-  const minY = Math.min(...currentRooms.map((room) => room.y))
-  const maxX = Math.max(...currentRooms.map((room) => room.x + room.width))
-  const maxY = Math.max(...currentRooms.map((room) => room.y + room.height))
+  const exteriorWalls = currentWalls.filter((wall) => wall.wallType === 'exterior')
+  const hasExteriorBounds = exteriorWalls.length > 0
+  const planMinX = hasExteriorBounds ? Math.min(...exteriorWalls.map((wall) => Math.min(wall.x1, wall.x2))) : Math.min(...currentRooms.map((room) => room.x))
+  const planMinY = hasExteriorBounds ? Math.min(...exteriorWalls.map((wall) => Math.min(wall.y1, wall.y2))) : Math.min(...currentRooms.map((room) => room.y))
+  const planMaxX = hasExteriorBounds ? Math.max(...exteriorWalls.map((wall) => Math.max(wall.x1, wall.x2))) : Math.max(...currentRooms.map((room) => room.x + room.width))
+  const planMaxY = hasExteriorBounds ? Math.max(...exteriorWalls.map((wall) => Math.max(wall.y1, wall.y2))) : Math.max(...currentRooms.map((room) => room.y + room.height))
+
+  const clippedRooms = currentRooms
+    .map((room) => {
+      const x = Math.max(room.x, planMinX)
+      const y = Math.max(room.y, planMinY)
+      const maxRoomX = Math.min(room.x + room.width, planMaxX)
+      const maxRoomY = Math.min(room.y + room.height, planMaxY)
+      const width = maxRoomX - x
+      const height = maxRoomY - y
+      if (width <= 0 || height <= 0) return null
+      return { ...room, x, y, width, height }
+    })
+    .filter((room): room is Room => room !== null)
+
+  if (!clippedRooms.length) {
+    return <div className="rounded-xl border border-warm-border bg-cream p-6 text-sm text-warm-stone">No drawable floor plan geometry found.</div>
+  }
+
+  const minX = Math.min(...clippedRooms.map((room) => room.x))
+  const minY = Math.min(...clippedRooms.map((room) => room.y))
+  const maxX = Math.max(...clippedRooms.map((room) => room.x + room.width))
+  const maxY = Math.max(...clippedRooms.map((room) => room.y + room.height))
 
   const width = maxX - minX
   const height = maxY - minY
   const dimOffset = Math.max(width, height) * 0.12
   const titleBlockH = Math.max(width, height) * 0.2
-  const pad = dimOffset * 1.3
+  const tick = Math.max(width, height) * 0.014
+  const pad = dimOffset * 0.8
 
-  const viewBoxX = minX - pad
-  const viewBoxY = minY - pad
-  const viewBoxW = width + pad * 2
-  const viewBoxH = height + pad * 2 + titleBlockH
+  const contentMinX = Math.min(minX - dimOffset, planMinX)
+  const contentMaxX = Math.max(maxX + dimOffset + tick * 2.4, planMaxX)
+  const contentMinY = Math.min(minY - dimOffset - tick * 1.5, planMinY)
+  const contentMaxY = Math.max(maxY + dimOffset * 0.8 + titleBlockH * 0.7, planMaxY)
+
+  const viewBoxX = contentMinX - pad
+  const viewBoxY = contentMinY - pad
+  const viewBoxW = contentMaxX - contentMinX + pad * 2
+  const viewBoxH = contentMaxY - contentMinY + pad * 2
 
   const exteriorStroke = Math.max(width, height) * 0.01
   const interiorStroke = Math.max(width, height) * 0.0055
   const detailStroke = Math.max(width, height) * 0.0022
-  const tick = Math.max(width, height) * 0.014
 
   const overallWidthLabel = formatFeet(width)
   const overallHeightLabel = formatFeet(height)
 
-  const stairRoom = currentRooms.find((room) => room.type.toLowerCase().includes('stair') || room.furniture.some((item) => item.includes('stair')))
+  const stairRoom = clippedRooms.find((room) => room.type.toLowerCase().includes('stair') || room.furniture.some((item) => item.includes('stair')))
+  const roomClipId = `room-clip-${selectedFloor}`
+
+  const sideDimensionLabels = ['top', 'right', 'bottom', 'left'].flatMap((side) => {
+    const sideWalls = currentWalls.filter((wall) => {
+      const horizontal = Math.abs(wall.y2 - wall.y1) < 0.0001
+      const vertical = Math.abs(wall.x2 - wall.x1) < 0.0001
+      if (!horizontal && !vertical) return false
+      const mx = (wall.x1 + wall.x2) / 2
+      const my = (wall.y1 + wall.y2) / 2
+      if (side === 'top') return horizontal && my <= minY + height * 0.3
+      if (side === 'bottom') return horizontal && my >= maxY - height * 0.3
+      if (side === 'left') return vertical && mx <= minX + width * 0.3
+      return vertical && mx >= maxX - width * 0.3
+    })
+    if (!sideWalls.length) return []
+
+    const wall = sideWalls[0]
+    const measured = wall.measurement ?? formatFeet(Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1))
+    const mx = (wall.x1 + wall.x2) / 2
+    const my = (wall.y1 + wall.y2) / 2
+    const offset = dimOffset * 0.35
+    const x = side === 'left' ? minX - offset : side === 'right' ? maxX + offset : mx
+    const y = side === 'top' ? minY - offset : side === 'bottom' ? maxY + offset : my
+    return [{ key: `${side}-${measured}`, measured, x, y }]
+  })
 
   return (
     <div className="w-full overflow-hidden rounded-xl border border-warm-border bg-[#f5f0e8]">
@@ -291,9 +379,42 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
         <svg className="h-auto w-full" viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxW} ${viewBoxH}`} role="img" aria-label="Architectural floor plan" style={{ fontFamily: "'Arial Narrow', Arial, sans-serif" }}>
           <rect x={viewBoxX} y={viewBoxY} width={viewBoxW} height={viewBoxH} fill="#f5f0e8" />
 
-          {currentRooms.map((room) => (
-            <rect key={`room-${room.id}`} x={room.x} y={room.y} width={room.width} height={room.height} fill="none" stroke="#000" strokeWidth={detailStroke} />
-          ))}
+          <defs>
+            <clipPath id={roomClipId}>
+              <rect x={planMinX} y={planMinY} width={planMaxX - planMinX} height={planMaxY - planMinY} />
+            </clipPath>
+            <marker id="stair-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 z" fill="#000" />
+            </marker>
+          </defs>
+
+          <g clipPath={`url(#${roomClipId})`}>
+            {clippedRooms.map((room) => (
+              <rect key={`room-${room.id}`} x={room.x} y={room.y} width={room.width} height={room.height} fill="none" stroke="#000" strokeWidth={detailStroke} />
+            ))}
+
+            {clippedRooms.map((room) => (
+              <g key={`furniture-${room.id}`}>{drawFurniture(room, detailStroke)}</g>
+            ))}
+
+            {clippedRooms.map((room) => {
+              const roomCenterX = room.x + room.width / 2
+              const roomBottomY = room.y + room.height
+              const roomPadding = Math.max(detailStroke * 7, Math.min(room.width, room.height) * 0.1)
+              const lineHeight = detailStroke * 8
+              const nameY = roomBottomY - roomPadding - lineHeight * 2
+              const dimensionsY = roomBottomY - roomPadding - lineHeight
+              const materialY = roomBottomY - roomPadding
+
+              return (
+                <g key={`label-${room.id}`}>
+                  <text x={roomCenterX} y={nameY} textAnchor="middle" fontWeight="700" fontSize={detailStroke * 10} fill="#000">{room.name.toUpperCase()}</text>
+                  <text x={roomCenterX} y={dimensionsY} textAnchor="middle" fontSize={detailStroke * 7} fill="#000">{formatFeet(room.width)} x {formatFeet(room.height)}</text>
+                  <text x={roomCenterX} y={materialY} textAnchor="middle" fontSize={detailStroke * 6} fill="#6b7280">{room.material}</text>
+                </g>
+              )
+            })}
+          </g>
 
           {currentWalls.map((wall) => (
             <line
@@ -337,20 +458,11 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
             )
           })}
 
-          {currentWalls.map((wall) => {
-            const mx = (wall.x1 + wall.x2) / 2
-            const my = (wall.y1 + wall.y2) / 2
-            const horizontal = Math.abs(wall.y2 - wall.y1) < 0.0001
-            const offset = dimOffset * 0.35
-            const y = horizontal ? (wall.y1 < minY + height / 2 ? minY - offset : maxY + offset) : my
-            const x = horizontal ? mx : wall.x1 < minX + width / 2 ? minX - offset : maxX + offset
-            const measured = wall.measurement ?? formatFeet(Math.hypot(wall.x2 - wall.x1, wall.y2 - wall.y1))
-            return (
-              <g key={`dim-${wall.id}`}>
-                <text x={x} y={y} fontSize={detailStroke * 7} textAnchor="middle" dominantBaseline="middle" fill="#000">{measured}</text>
-              </g>
-            )
-          })}
+          {sideDimensionLabels.map((label) => (
+            <g key={label.key}>
+              <text x={label.x} y={label.y} fontSize={detailStroke * 7} textAnchor="middle" dominantBaseline="middle" fill="#000">{label.measured}</text>
+            </g>
+          ))}
 
           <g>
             <line x1={minX} y1={minY - dimOffset} x2={maxX} y2={minY - dimOffset} stroke="#000" strokeWidth={detailStroke} />
@@ -364,28 +476,6 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
             <text x={maxX + dimOffset + tick * 1.8} y={minY + height / 2} fontSize={detailStroke * 8} fill="#000" transform={`rotate(90 ${maxX + dimOffset + tick * 1.8} ${minY + height / 2})`} textAnchor="middle">{overallHeightLabel}</text>
           </g>
 
-          {currentRooms.map((room) => (
-            <g key={`furniture-${room.id}`}>{drawFurniture(room, detailStroke)}</g>
-          ))}
-
-          {currentRooms.map((room) => {
-            const roomCenterX = room.x + room.width / 2
-            const roomBottomY = room.y + room.height
-            const roomPadding = Math.max(detailStroke * 7, Math.min(room.width, room.height) * 0.1)
-            const lineHeight = detailStroke * 8
-            const nameY = roomBottomY - roomPadding - lineHeight * 2
-            const dimensionsY = roomBottomY - roomPadding - lineHeight
-            const materialY = roomBottomY - roomPadding
-
-            return (
-              <g key={`label-${room.id}`}>
-                <text x={roomCenterX} y={nameY} textAnchor="middle" fontWeight="700" fontSize={detailStroke * 10} fill="#000">{room.name.toUpperCase()}</text>
-                <text x={roomCenterX} y={dimensionsY} textAnchor="middle" fontSize={detailStroke * 7} fill="#000">{formatFeet(room.width)} x {formatFeet(room.height)}</text>
-                <text x={roomCenterX} y={materialY} textAnchor="middle" fontSize={detailStroke * 6} fill="#6b7280">{room.material}</text>
-              </g>
-            )
-          })}
-
           {stairRoom && (
             <g>
               {Array.from({ length: 8 }).map((_, index) => {
@@ -396,12 +486,6 @@ function BlueprintSvg({ floorPlanJson, projectTitle }: { floorPlanJson: FloorPla
               <text x={stairRoom.x + stairRoom.width * 0.5} y={stairRoom.y + stairRoom.height * 0.95} textAnchor="middle" fontSize={detailStroke * 6} fontWeight="700">UP</text>
             </g>
           )}
-
-          <defs>
-            <marker id="stair-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-              <path d="M0,0 L8,4 L0,8 z" fill="#000" />
-            </marker>
-          </defs>
 
           <g>
             <rect x={minX} y={maxY + dimOffset * 0.8} width={width} height={titleBlockH * 0.7} fill="none" stroke="#000" strokeWidth={detailStroke} />
@@ -466,6 +550,8 @@ export function Step1FloorPlan({ project, onProjectChange }: Step1FloorPlanProps
 
       if (!response.ok) throw new Error('Floor plan generation request failed.')
       const result = (await response.json()) as FloorPlanResponse
+      const parsedResult = parseFloorPlan(result)
+      warnOnOverlappingRooms(parsedResult.rooms)
 
       const updated = await updateProject(project.id, {
         prompt: promptValue.trim(),
